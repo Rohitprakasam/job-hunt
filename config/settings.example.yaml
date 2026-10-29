@@ -1,0 +1,40 @@
+# Copy to settings.yaml. Budget is $0: free tier only, limited by requests, not dollars.
+llm:
+  free_only: true
+  monthly_cap_usd: 0
+  # Model ids copied from rohit-s-modern-profile/lib/gemini.ts. `agent doctor` lists which ones the key can use;
+  # remove any it reports missing.
+  fast_models:
+    - gemini-3.5-flash-lite
+    - gemini-3.1-flash-lite
+  strong_models:
+    - gemini-3.8-flash
+    - gemini-3.7-flash
+    - gemini-3.6-flash
+    - gemini-3.5-flash
+  embedding_model: gemini-embedding-001
+  # Copy real numbers from AI Studio -> Rate limits for this project. These are conservative placeholders.
+  # The key is shared with the RohitOS bot, so the agent stops at quota_headroom of each limit.
+  limits:
+    gemini-3.5-flash-lite: {rpm: 15, rpd: 500}
+    gemini-3.1-flash-lite: {rpm: 15, rpd: 500}
+    gemini-3.8-flash: {rpm: 10, rpd: 200}
+    gemini-3.7-flash: {rpm: 10, rpd: 200}
+    gemini-3.6-flash: {rpm: 10, rpd: 200}
+    gemini-3.5-flash: {rpm: 10, rpd: 200}
+  quota_headroom: 0.9
+  request_timeout_s: 60
+  max_retries: 2
+
+whatsapp:
+  graph_api_version: v25.0
+  window_hours: 23.5
+
+mongo:
+  agent_db: job_agent
+  bot_db: rohit_portfolio
+  portfolio_db: portfolio
+
+redaction:
+  redact_other_urls: false
+  min_name_token_len: 3

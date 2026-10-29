@@ -1,0 +1,7 @@
+# Copy to companies.yaml. Watchlist of employers whose ATS boards are polled directly (Phase 1).
+companies:
+  - name: Example Co
+    domain: example.com
+    ats_type: greenhouse
+    ats_slug: exampleco
+    watchlist: true

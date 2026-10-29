@@ -1,0 +1,79 @@
+# FAKE example profile. Copy to profile.yaml (gitignored) or run `agent profile import`.
+# Every bullet id must be unique; later phases select bullets by id. Only true facts go here.
+contact:
+  full_name: Testa Candidato Q
+  first_name: Testa
+  last_name: Candidato
+  name_variants: ["Testa Candidato", "CANDIDATO Q"]
+  email: testa.candidato@example.com
+  phone_e164: "+919000000001"
+  city: Chennai
+  country: India
+  links:
+    - label: LinkedIn
+      url: https://linkedin.com/in/testa-candidato-q-000000001/
+      handle: testa-candidato-q-000000001
+    - label: GitHub
+      url: https://github.com/TestaCandidato
+      handle: TestaCandidato
+    - label: Instagram
+      url: https://www.instagram.com/testa__fake
+      handle: testa__fake
+      on_resume: false
+
+summary: Linux system administrator with a focus on automation and network security.
+
+work_authorization:
+  countries: [India]
+  needs_sponsorship: false
+
+notice_period_days: 0
+
+graduation:
+  degree: Bachelor of Engineering
+  institution: Example Institute of Technology
+  date: 2026-05
+
+salary_expectation:
+  currency: INR
+  min: 300000
+  target: 450000
+
+experience:
+  - id: example-corp
+    company: Example Corp
+    title: System Administrator Intern
+    start: 2024-03
+    end: 2024-04
+    location: Chennai
+    bullets:
+      - id: example-corp-01
+        text: Administered Linux servers and kept uptime at 99.9%.
+        skills: [Linux]
+        metrics: ["99.9%"]
+      - id: example-corp-02
+        text: Automated nightly backups with Bash and cron.
+        skills: [Bash, Backup & Recovery]
+
+education:
+  - institution: Example Institute of Technology
+    degree: Bachelor of Engineering
+    start: 2022-12
+    end: 2026-05
+    score: "CGPA: 7.0"
+
+skills:
+  System Administration: [Linux, Bash, Backup & Recovery]
+  Security: [Nmap, Wireshark]
+
+projects:
+  - id: wifi-assessment
+    name: Wi-Fi Security Assessment
+    tags: [WiFi, Penetration Testing]
+    bullets:
+      - id: wifi-assessment-01
+        text: Assessed WPA2 weaknesses in a lab network and documented fixes.
+        skills: [Aircrack-ng]
+
+certifications:
+  - name: Red Hat Certified System Administrator (RHCSA)

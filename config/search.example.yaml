@@ -1,0 +1,13 @@
+# Copy to search.yaml. Used from Phase 1 (discovery and filtering).
+roles:
+  - System Administrator
+  - Linux Administrator
+  - Security Analyst
+seniority: [intern, entry, junior]
+locations: [Chennai, Bengaluru, Remote]
+remote_ok: true
+salary_floor: 300000
+currency: INR
+blocklist_companies: []
+blocklist_keywords: [unpaid, commission only]
+max_posting_age_days: 14

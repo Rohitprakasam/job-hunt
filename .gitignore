@@ -1,0 +1,29 @@
+# Personal data and secrets: never commit
+config/profile.yaml
+config/profile.draft.yaml
+config/search.yaml
+config/companies.yaml
+config/settings.yaml
+*.env
+.env*
+secrets.env
+client_secret*.json
+token*.json
+*.db
+*.db-wal
+*.db-shm
+data/
+logs/
+output/
+browser-profile/
+STOP
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/

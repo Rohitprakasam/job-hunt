@@ -1,0 +1,31 @@
+# All hooks run from the project venv (`uv sync` first), so nothing is downloaded at commit time.
+# Windows paths: pre-commit shlex-splits `entry`, so each `\\` below becomes one backslash; forward
+# slashes in a relative exe path fail in CreateProcess.
+repos:
+  - repo: local
+    hooks:
+      - id: block-personal-files
+        name: block personal data and secrets files
+        language: fail
+        entry: "These files hold personal data or secrets and must never be committed:"
+        files: '(^|/)config/(profile|profile\.draft|search|companies|settings)\.yaml$|\.db(-wal|-shm)?$|client_secret.*\.json$|token.*\.json$|(^|/)\.env|secrets\.env$'
+      - id: detect-secrets
+        name: detect-secrets
+        language: system
+        entry: .venv\\Scripts\\python.exe -m detect_secrets.pre_commit_hook --baseline .secrets.baseline
+        exclude: '^uv\.lock$'
+      - id: ruff
+        name: ruff check
+        language: system
+        entry: .venv\\Scripts\\python.exe -m ruff check --force-exclude
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        language: system
+        entry: .venv\\Scripts\\python.exe -m ruff format --force-exclude --check
+        types: [python]
+      - id: large-files
+        name: block files over 500 KB
+        language: system
+        entry: .venv\\Scripts\\python.exe -c "import os,sys; big=[f for f in sys.argv[1:] if os.path.getsize(f)>500_000]; print(*big); sys.exit(bool(big))"
+        exclude: '^uv\.lock$'

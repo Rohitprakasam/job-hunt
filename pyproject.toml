@@ -1,0 +1,59 @@
+[project]
+name = "job-agent"
+version = "0.1.0"
+description = "Local-first job hunt agent: discover, rank, apply, track, notify."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "keyring>=25",
+    "litellm>=1.50",
+    "pydantic>=2.7",
+    "pymongo>=4.8",
+    "python-dateutil>=2.9",
+    "pyyaml>=6",
+    "rich>=13",
+    "typer>=0.12",
+    "tzdata>=2024.1",
+]
+
+[project.scripts]
+agent = "agent.cli:app"
+
+[dependency-groups]
+dev = [
+    "detect-secrets>=1.5",
+    "mongomock>=4.1",
+    "pre-commit>=3.7",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"agent/migrations" = "agent/migrations"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "TID"]
+# B008: typer declares options as call defaults by design. E501: the formatter owns line length;
+# long SQL strings and URLs are left whole.
+ignore = ["B008", "E501"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"litellm".msg = "Only agent/llm.py may import litellm (redaction and quota choke point)."
+
+[tool.ruff.lint.per-file-ignores]
+"agent/llm.py" = ["TID251"]
