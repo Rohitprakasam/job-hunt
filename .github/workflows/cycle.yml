@@ -1,0 +1,33 @@
+name: Hourly Job Cycle
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency: cycle
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger cycle on rohit-6
+        env:
+          URL: ${{ secrets.ROHIT6_TRIGGER_URL }}
+          TOKEN: ${{ secrets.ROHIT6_TRIGGER_TOKEN }}
+        run: |
+          CODE=$(curl -s -o /tmp/r -w '%{http_code}' -X POST --max-time 90 -H "Authorization: Bearer $TOKEN" "$URL/cycle")
+          if [ "$CODE" = "200" ]; then
+            python3 -c "import json, sys; d = json.load(open('/tmp/r')); sys.stdout.write(d.get('status', 'ok') + '\n')" 2>/dev/null || cat /tmp/r
+          elif [ "$CODE" = "409" ]; then
+            echo "cooldown, next hour"
+          elif [ "$CODE" = "503" ]; then
+            echo "waking, next hour"
+          else
+            echo "Unexpected status code: $CODE"
+            exit 1
+          fi
+
