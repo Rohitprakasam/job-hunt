@@ -2,7 +2,7 @@ name: Hourly Job Cycle
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "7,27,47 * * * *"
   workflow_dispatch:
 
 permissions: {}

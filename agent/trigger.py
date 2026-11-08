@@ -16,7 +16,7 @@ from agent import lock, paths
 
 log = logging.getLogger(__name__)
 
-MIN_INTERVAL_SECONDS = 20 * 60  # at least 20 minutes between cycle starts
+MIN_INTERVAL_SECONDS = 50 * 60  # at least 50 minutes between cycle starts (at most 1 cycle/hour)
 
 
 def _last_start_file() -> Path:
