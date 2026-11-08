@@ -671,61 +671,53 @@ def boards_login(
                     )
 
                     def check_logged_in() -> bool:
-                        current_url = page.url.lower()
-                        if site == "linkedin":
-                            if (
-                                "session_redirect" in current_url
-                                or "/login" in current_url
-                                or "/checkpoint" in current_url
-                            ):
-                                return False
-                            if (
-                                "linkedin.com/feed" in current_url
-                                or "/in/" in current_url
-                                or "/mynetwork" in current_url
-                                or "/jobs" in current_url
-                            ):
-                                return True
+                        for p in context.pages:
                             try:
-                                if (
-                                    page.query_selector(
-                                        ".global-nav, #global-nav, [data-view-name*='profile']"
-                                    )
-                                    is not None
-                                ):
-                                    return True
+                                current_url = p.evaluate("() => window.location.href").lower()
+                                if site == "linkedin":
+                                    if (
+                                        "session_redirect" in current_url
+                                        or "/login" in current_url
+                                        or "/checkpoint" in current_url
+                                    ):
+                                        continue
+                                    if (
+                                        "linkedin.com/feed" in current_url
+                                        or "/in/" in current_url
+                                        or "/mynetwork" in current_url
+                                        or "/jobs" in current_url
+                                    ):
+                                        return True
+                                    if (
+                                        p.query_selector(
+                                            ".global-nav, #global-nav, [data-view-name*='profile']"
+                                        )
+                                        is not None
+                                    ):
+                                        return True
+                                elif site == "naukri":
+                                    if "/nlogin" in current_url or "/login" in current_url:
+                                        continue
+                                    if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
+                                        return True
+                                    if p.query_selector(".user-info, .nI-gNb-drawer") is not None:
+                                        return True
+                                elif site == "indeed":
+                                    if "/auth" in current_url or "/account/login" in current_url:
+                                        continue
+                                    if "indeed.com" in current_url and (
+                                        "/feed" in current_url or "/home" in current_url
+                                    ):
+                                        return True
+                                    if (
+                                        p.query_selector(
+                                            "[data-gnav-element*='profile'], button[aria-label*='account']"
+                                        )
+                                        is not None
+                                    ):
+                                        return True
                             except Exception:
                                 pass
-                            return False
-                        elif site == "naukri":
-                            if "/nlogin" in current_url or "/login" in current_url:
-                                return False
-                            if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
-                                return True
-                            try:
-                                if page.query_selector(".user-info, .nI-gNb-drawer") is not None:
-                                    return True
-                            except Exception:
-                                pass
-                            return False
-                        elif site == "indeed":
-                            if "/auth" in current_url or "/account/login" in current_url:
-                                return False
-                            if "indeed.com" in current_url and (
-                                "/feed" in current_url or "/home" in current_url
-                            ):
-                                return True
-                            try:
-                                if (
-                                    page.query_selector(
-                                        "[data-gnav-element*='profile'], button[aria-label*='account']"
-                                    )
-                                    is not None
-                                ):
-                                    return True
-                            except Exception:
-                                pass
-                            return False
                         return False
 
                     resolved = wait_for_resolution(
