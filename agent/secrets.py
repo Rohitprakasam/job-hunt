@@ -72,7 +72,22 @@ class SecretTooLong(ValueError):
 def _from_env(name: str) -> str | None:
     raw = str(name).strip()
     clean = re.sub(r"[^A-Za-z0-9_]", "_", raw).upper()
-    return os.getenv(f"JOB_AGENT_SECRET_{clean}") or None
+    val = os.getenv(f"JOB_AGENT_SECRET_{clean}")
+    if val:
+        return val
+    env_file = Path.home() / ".config" / "job-agent" / "env"
+    if env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip().removeprefix("export ")
+                if line.startswith(f"JOB_AGENT_SECRET_{clean}="):
+                    v = line.split("=", 1)[1].strip()
+                    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                        v = v[1:-1]
+                    return v or None
+        except Exception:
+            pass
+    return None
 
 
 def get(name: Secret | str) -> str:

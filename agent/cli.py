@@ -625,8 +625,8 @@ def boards_login(
     """Open a job board login page in headed browser and trigger live view for manual user sign-in."""
     from agent.apply.boards import indeed, linkedin, naukri
     from agent.apply.boards.runner import default_board_browser
+    from agent.context import open_ctx
     from agent.live_view import live_view, wait_for_resolution
-    from agent.scheduler import open_ctx
 
     site = site.lower().strip()
     login_urls = {
@@ -644,93 +644,93 @@ def boards_login(
         "indeed": indeed,
     }
     adapter = adapters[site]
-    settings = config.load_settings()
 
-    wa = None
-    try:
-        with open_ctx(need_profile=False) as ctx:
-            wa = ctx.wa
-    except Exception:
-        pass
+    with open_ctx(need_profile=False) as ctx:
+        settings = ctx.settings
 
-    console.print(f"Opening browser for [bold]{site.capitalize()}[/] login...")
-    with default_board_browser(settings) as context:
-        page = context.new_page()
-        try:
-            url = login_urls[site]
-            console.print(f"Navigating to {url}...")
-            page.goto(url, timeout=30000, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
+        console.print(f"Opening browser for [bold]{site.capitalize()}[/] login...")
+        with default_board_browser(settings) as context:
+            page = context.new_page()
+            try:
+                url = login_urls[site]
+                console.print(f"Navigating to {url}...")
+                page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
 
-            console.print("Opening live view session...")
-            with live_view(
-                site,
-                "initial login",
-                wa_client=wa,
-                timeout_minutes=settings.apply.human_step_minutes,
-            ) as session:
-                if not session:
+                console.print("Opening live view session...")
+                with live_view(
+                    site,
+                    "initial login",
+                    wa_client=ctx.wa,
+                    timeout_minutes=settings.apply.human_step_minutes,
+                ) as session:
+                    if not session:
+                        console.print(
+                            "[red]Could not open live view session. Ensure WhatsApp window is open and JOB_AGENT_SECRET_LIVE_VIEW_LINK is configured.[/]"
+                        )
+                        raise typer.Exit(1)
+
+                    console.print(f"[green]Live view open for {site.capitalize()}![/]")
                     console.print(
-                        "[red]Could not open live view session. Ensure JOB_AGENT_SECRET_LIVE_VIEW_LINK is configured.[/]"
+                        "WhatsApp prompt sent. Open the link from WhatsApp, enter the password, and log in."
                     )
-                    raise typer.Exit(1)
+                    console.print(
+                        f"Waiting up to {settings.apply.human_step_minutes} minutes for login to complete..."
+                    )
 
-                console.print(f"[green]Live view open for {site.capitalize()}![/]")
-                console.print("Check WhatsApp for the live view link and password, then log in.")
-                console.print(
-                    f"Waiting up to {settings.apply.human_step_minutes} minutes for login to complete..."
-                )
-
-                def check_logged_in() -> bool:
-                    current_url = page.url.lower()
-                    if site == "linkedin":
-                        if "linkedin.com/feed" in current_url or "/in/" in current_url:
-                            return True
-                        try:
-                            if page.query_selector(".global-nav, [data-view-name*='profile']") is not None:
+                    def check_logged_in() -> bool:
+                        current_url = page.url.lower()
+                        if site == "linkedin":
+                            if "linkedin.com/feed" in current_url or "/in/" in current_url:
                                 return True
-                        except Exception:
-                            pass
-                    elif site == "naukri":
-                        if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
-                            return True
-                        try:
-                            if page.query_selector(".user-info, .nI-gNb-drawer") is not None:
-                                return True
-                        except Exception:
-                            pass
-                    elif site == "indeed":
-                        if (
-                            "indeed.com" in current_url
-                            and "/auth" not in current_url
-                            and "/account/login" not in current_url
-                        ):
                             try:
                                 if (
-                                    page.query_selector(
-                                        "[data-gnav-element*='profile'], button[aria-label*='account']"
-                                    )
+                                    page.query_selector(".global-nav, [data-view-name*='profile']")
                                     is not None
                                 ):
                                     return True
                             except Exception:
                                 pass
-                    state = adapter.detect_state(page)
-                    return state.state not in ("needs_human", "blocked")
+                        elif site == "naukri":
+                            if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
+                                return True
+                            try:
+                                if page.query_selector(".user-info, .nI-gNb-drawer") is not None:
+                                    return True
+                            except Exception:
+                                pass
+                        elif site == "indeed":
+                            if (
+                                "indeed.com" in current_url
+                                and "/auth" not in current_url
+                                and "/account/login" not in current_url
+                            ):
+                                try:
+                                    if (
+                                        page.query_selector(
+                                            "[data-gnav-element*='profile'], button[aria-label*='account']"
+                                        )
+                                        is not None
+                                    ):
+                                        return True
+                                except Exception:
+                                    pass
+                        state = adapter.detect_state(page)
+                        return state.state not in ("needs_human", "blocked")
 
-                resolved = wait_for_resolution(
-                    session,
-                    check_logged_in,
-                    timeout_seconds=settings.apply.human_step_minutes * 60,
-                    poll_interval_s=3.0,
-                )
-                if resolved:
-                    console.print(f"[bold green]Successfully logged in to {site.capitalize()}![/]")
-                    console.print("Session cookies and state saved to persistent profile.")
-                else:
-                    console.print(f"[yellow]Timed out waiting for login to {site.capitalize()}.[/]")
-        finally:
-            page.close()
+                    resolved = wait_for_resolution(
+                        session,
+                        check_logged_in,
+                        timeout_seconds=settings.apply.human_step_minutes * 60,
+                        poll_interval_s=3.0,
+                    )
+                    if resolved:
+                        console.print(f"[bold green]Successfully logged in to {site.capitalize()}![/]")
+                        console.print("Session cookies and state saved to persistent profile.")
+                    else:
+                        console.print(f"[yellow]Timed out waiting for login to {site.capitalize()}.[/]")
+            finally:
+                page.close()
 
 
 # ---------------------------------------------------------------- review
