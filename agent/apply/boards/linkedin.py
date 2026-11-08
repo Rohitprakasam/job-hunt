@@ -105,6 +105,8 @@ def apply(
     confirmation_timeout_s: int = 30,
 ) -> tuple[str, str | None, Path | None]:
     """Execute LinkedIn Easy Apply flow. Returns (outcome, error, screenshot_path)."""
+    app_dict = dict(app)
+
     # Click Easy Apply
     clicked = False
     for sel in EASY_APPLY_SELECTORS:
@@ -135,9 +137,13 @@ def apply(
     while step < max_steps:
         step += 1
         page.wait_for_timeout(1000)
+        modal = page.query_selector(modal_selector)
+        if not modal or not modal.is_visible():
+            break
+
         modal_text = ""
         try:
-            modal_text = page.inner_text(modal_selector).lower()
+            modal_text = modal.inner_text().lower()
         except Exception:
             pass
 
@@ -152,21 +158,23 @@ def apply(
 
         # 1. Resume upload if present
         try:
-            resume_path = app["resume_path"] if "resume_path" in app.keys() and app["resume_path"] else None
+            resume_path = (
+                app_dict["resume_path"] if "resume_path" in app_dict and app_dict["resume_path"] else None
+            )
             if resume_path and os.path.exists(resume_path):
-                file_inputs = page.query_selector_all(f"{modal_selector} input[type='file']")
-                for fi in file_inputs:
-                    fi.set_input_files(str(resume_path))
-                    page.wait_for_timeout(1000)
-                if not file_inputs:
-                    upload_btn = page.query_selector(
-                        f"{modal_selector} button:has-text('Upload resume'), {modal_selector} [aria-label*='Upload resume']"
-                    )
-                    if upload_btn and upload_btn.is_visible():
-                        with page.expect_file_chooser(timeout=5000) as fc_info:
-                            upload_btn.click()
-                        fc_info.value.set_files(str(resume_path))
-                        page.wait_for_timeout(2000)
+                upload_btn = modal.query_selector(
+                    "button:has-text('Upload resume'), [aria-label*='Upload resume']"
+                )
+                if upload_btn and upload_btn.is_visible():
+                    with page.expect_file_chooser(timeout=5000) as fc_info:
+                        upload_btn.click()
+                    fc_info.value.set_files(str(resume_path))
+                    page.wait_for_timeout(2000)
+                else:
+                    file_inputs = modal.query_selector_all("input[type='file']")
+                    for fi in file_inputs:
+                        fi.set_input_files(str(resume_path))
+                        page.wait_for_timeout(1000)
         except Exception as file_exc:
             log.warning("error attaching resume on LinkedIn: %s", file_exc)
 
@@ -176,13 +184,24 @@ def apply(
             fields = [form.Field.from_js(rf) for rf in raw_fields if rf.get("label") != "Select language"]
             if fields:
                 resume_p = (
-                    Path(app["resume_path"]) if "resume_path" in app.keys() and app["resume_path"] else None
+                    Path(app_dict["resume_path"])
+                    if "resume_path" in app_dict and app_dict["resume_path"]
+                    else None
                 )
                 cover_p = (
-                    Path(app["cover_path"]) if "cover_path" in app.keys() and app["cover_path"] else None
+                    Path(app_dict["cover_path"])
+                    if "cover_path" in app_dict and app_dict["cover_path"]
+                    else None
                 )
                 planned = form.plan_fields(
-                    fields, conn, profile, client, resume_p, cover_p, app["job_id"], app.get("company", "")
+                    fields,
+                    conn,
+                    profile,
+                    client,
+                    resume_p,
+                    cover_p,
+                    app_dict.get("job_id"),
+                    app_dict.get("company", ""),
                 )
                 # Answer gate check
                 for f in planned:
@@ -195,7 +214,7 @@ def apply(
 
         # 3. Untick 'Follow <company>' if present
         try:
-            checkboxes = page.query_selector_all(f"{modal_selector} input[type='checkbox']")
+            checkboxes = modal.query_selector_all("input[type='checkbox']")
             for cb in checkboxes:
                 parent_text = cb.evaluate("el => el.closest('label, div')?.innerText || ''").lower()
                 if "follow" in parent_text and cb.is_checked():
@@ -209,9 +228,10 @@ def apply(
             "button:has-text('Submit application')",
             "button[aria-label='Submit application']",
             "button:has-text('Submit')",
+            "#submit",
         ]:
             try:
-                b = page.query_selector(f"{modal_selector} {submit_sel}")
+                b = modal.query_selector(submit_sel)
                 if b and b.is_visible() and b.is_enabled():
                     submit_btn = b
                     break
@@ -231,7 +251,18 @@ def apply(
                 ):
                     page.screenshot(path=str(screenshot_path))
                     return "confirmed", None, screenshot_path
-            # Take screenshot anyway
+
+            # If modal closed and page now says applied
+            page.wait_for_timeout(2000)
+            dlg_open = page.query_selector(modal_selector)
+            if dlg_open and dlg_open.is_visible():
+                page.screenshot(path=str(screenshot_path))
+                return (
+                    "failed",
+                    "Submit clicked but modal remained open (validation error)",
+                    screenshot_path,
+                )
+
             page.screenshot(path=str(screenshot_path))
             return "submitted", None, screenshot_path
 
@@ -244,7 +275,7 @@ def apply(
             "button[aria-label='Review your application']",
         ]:
             try:
-                b = page.query_selector(f"{modal_selector} {next_sel}")
+                b = modal.query_selector(next_sel)
                 if b and b.is_visible() and b.is_enabled():
                     next_btn = b
                     break
