@@ -631,7 +631,7 @@ def boards_login(
     login_urls = {
         "linkedin": "https://www.linkedin.com/login",
         "naukri": "https://www.naukri.com/nlogin/login",
-        "indeed": "https://secure.indeed.com/auth",
+        "indeed": "https://in.indeed.com/",
     }
     if site not in login_urls:
         console.print(f"[red]Unknown site '{site}'. Choose from: linkedin, naukri, indeed[/]")
