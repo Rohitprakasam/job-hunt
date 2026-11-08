@@ -148,20 +148,23 @@ def stop_xvfb(proc: subprocess.Popen | None, display: str = DEFAULT_DISPLAY) -> 
             pass
 
 
-def kill_stale_live_view_procs() -> None:
+def kill_stale_live_view_procs(port: int = DEFAULT_PORT, vnc_port: int = DEFAULT_VNC_PORT) -> None:
     """Kill any stale x11vnc or websockify instances before starting a new view."""
     if os.name != "nt" and shutil.which("pkill"):
         for proc_name in ("websockify", "x11vnc"):
             try:
                 subprocess.run(
-                    ["pkill", "-f", proc_name],
+                    ["pkill", "-9", "-f", proc_name],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
             except Exception:
                 pass
-        time.sleep(0.3)
+        for _ in range(15):
+            if not is_port_open(port) and not is_port_open(vnc_port):
+                break
+            time.sleep(0.2)
 
 
 def open_view(
@@ -177,7 +180,8 @@ def open_view(
 
     If the WhatsApp send fails or 24h window is closed, the view is NOT opened and None is returned.
     """
-    kill_stale_live_view_procs()
+    kill_stale_live_view_procs(port, vnc_port)
+
     link = os.environ.get("JOB_AGENT_SECRET_LIVE_VIEW_LINK", "").strip()
     if not link:
         from pathlib import Path
@@ -254,6 +258,9 @@ def open_view(
         # Wait for VNC port
         vnc_ready = False
         for _ in range(25):
+            poll_vnc = session.vnc_proc.poll()
+            if poll_vnc is not None and isinstance(poll_vnc, int):
+                raise RuntimeError(f"x11vnc process exited unexpectedly with code {poll_vnc}")
             if is_port_open(vnc_port):
                 vnc_ready = True
                 break
@@ -270,6 +277,9 @@ def open_view(
         # Wait for port 6080
         ws_ready = False
         for _ in range(25):
+            poll_ws = session.ws_proc.poll()
+            if poll_ws is not None and isinstance(poll_ws, int):
+                raise RuntimeError(f"websockify process exited unexpectedly with code {poll_ws}")
             if is_port_open(port):
                 ws_ready = True
                 break
@@ -292,10 +302,11 @@ def close_view(session: LiveViewSession | None) -> None:
         if proc is not None:
             try:
                 proc.terminate()
-                proc.wait(timeout=2)
+                proc.wait(timeout=1)
             except Exception:
                 try:
                     proc.kill()
+                    proc.wait(timeout=1)
                 except Exception:
                     pass
     session.ws_proc = None
@@ -306,6 +317,8 @@ def close_view(session: LiveViewSession | None) -> None:
         if not is_port_open(session.port) and not is_port_open(session.vnc_port):
             break
         time.sleep(0.2)
+    if is_port_open(session.port) or is_port_open(session.vnc_port):
+        kill_stale_live_view_procs(session.port, session.vnc_port)
     log.info("live view closed for %s", session.site)
 
 

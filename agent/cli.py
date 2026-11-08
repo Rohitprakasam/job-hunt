@@ -673,13 +673,11 @@ def boards_login(
                     def check_logged_in() -> bool:
                         for p in context.pages:
                             try:
+                                if p.is_closed():
+                                    continue
                                 current_url = p.url.lower()
-                                try:
-                                    eval_url = p.evaluate("() => window.location.href").lower()
-                                    if "chromewebdata" not in eval_url:
-                                        current_url = eval_url
-                                except Exception:
-                                    pass
+                                if "chromewebdata" in current_url:
+                                    continue
 
                                 if site == "linkedin":
                                     if (
@@ -715,13 +713,20 @@ def boards_login(
                                 elif site == "indeed":
                                     if "/auth" in current_url or "/account/login" in current_url:
                                         continue
-                                    if "indeed.com" in current_url and (
-                                        "/feed" in current_url or "/home" in current_url
+                                    if "indeed.com" in current_url and any(
+                                        x in current_url
+                                        for x in (
+                                            "/feed",
+                                            "/home",
+                                            "/myjobs",
+                                            "profile.indeed.com",
+                                            "/resume",
+                                        )
                                     ):
                                         return True
                                     if (
                                         p.query_selector(
-                                            "[data-gnav-element*='profile'], button[aria-label*='account'], #AccountMenu"
+                                            "[data-gnav-element*='profile'], button[aria-label*='account'], #AccountMenu, a[href*='account'], a[href*='profile']"
                                         )
                                         is not None
                                     ):
