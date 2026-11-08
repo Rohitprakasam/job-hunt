@@ -4,6 +4,11 @@ config/profile.draft.yaml
 config/search.yaml
 config/companies.yaml
 config/settings.yaml
+config/cluster.yaml
+config/contacts.csv
+config/*.bak
+config/*.tex
+!config/*.example.tex
 *.env
 .env*
 secrets.env

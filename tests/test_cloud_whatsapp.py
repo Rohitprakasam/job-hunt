@@ -64,7 +64,7 @@ class DownClient:
 
 
 def test_init_collections_seeds_control(cloud, mongo):
-    assert set(cloud.init_collections()) == {"heartbeat", "control"}
+    assert set(cloud.init_collections()) == {"heartbeat", "control", "snapshot"}
     assert cloud.init_collections()  # idempotent
     assert mongo["job_agent"]["control"].find_one({"_id": "control"})["stop"] is False
     assert cloud.read_control() is False

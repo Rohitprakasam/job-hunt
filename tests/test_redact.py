@@ -85,3 +85,11 @@ def test_assert_clean_raises_without_values(r):
 
 def test_assert_clean_passes_after_redact(r, profile):
     r.assert_clean(r.redact(profile.as_text()))
+
+
+def test_dates_and_timestamps_are_not_phones(profile, settings):
+    r = Redactor.from_profile(profile, settings.redaction)
+    for text in ("2026-10-29 09:33:22,726 INFO", "Mar 2024: 2024-03 - 2024-04", "2025/12/31 23"):
+        assert r.redact(text) == text
+    assert r.redact("call +44 20 7946 0958") == "call [[OTHER_PHONE]]"
+    assert r.redact("me: 2026-90000-00001".replace("2026-", "+91 ")) == "me: [[CANDIDATE_PHONE]]"

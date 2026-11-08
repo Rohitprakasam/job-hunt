@@ -35,6 +35,31 @@ def backups_dir() -> Path:
     return agent_home() / "backups"
 
 
+def output_dir() -> Path:
+    """Resumes, screenshots, reports and prep packs (personal: outside the repo)."""
+    path = agent_home() / "output"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def application_dir(app_id: int) -> Path:
+    path = output_dir() / "applications" / f"{app_id:05d}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def briefs_dir() -> Path:
+    """Research briefs imported from research agent."""
+    path = agent_home() / "briefs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def browser_profile_dir() -> Path:
+    """Separate Chromium profile used only for applying."""
+    return agent_home() / "browser-profile"
+
+
 def config_dir() -> Path:
     return Path(os.environ.get("JOB_AGENT_CONFIG", REPO_ROOT / "config"))
 

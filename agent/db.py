@@ -99,13 +99,24 @@ def migrate(conn: sqlite3.Connection) -> MigrationResult:
     if not pending:
         return MigrationResult(start, start, None)
     backup_path = backup(conn, f"v{start}") if _has_tables(conn) else None
-    for version, path in pending:
-        sql = path.read_text(encoding="utf-8")
-        # executescript would COMMIT first, so run statements one by one inside one transaction.
-        with transaction(conn):
-            for statement in _split_sql(sql):
-                conn.execute(statement)
-            conn.execute(f"PRAGMA user_version = {version:d}")
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for version, path in pending:
+            sql = path.read_text(encoding="utf-8")
+            # executescript would COMMIT first, so run statements one by one inside one transaction.
+            with transaction(conn):
+                for statement in _split_sql(sql):
+                    conn.execute(statement)
+                conn.execute(f"PRAGMA user_version = {version:d}")
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    if start < 3 and current_version(conn) >= 3:
+        try:
+            from agent.discover.base import resolve_existing_shortlinks
+
+            resolve_existing_shortlinks(conn)
+        except Exception:
+            pass
     return MigrationResult(start, current_version(conn), backup_path)
 
 

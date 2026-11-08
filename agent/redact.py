@@ -14,6 +14,7 @@ from agent.config import Profile, RedactionSettings
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # A run of digits with the separators people use in phone numbers.
 PHONE_RE = re.compile(r"(?<![\w+])\+?\d[\d\s().-]{8,}\d(?!\w)")
+DATE_LIKE_RE = re.compile(r"(19|20)\d{2}[-/.](0[1-9]|1[0-2])\b")
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
 PLACEHOLDER_RE = re.compile(r"\[\[(?:CANDIDATE|OTHER)_[A-Z_]+?(?:_\d+)?\]\]")
 
@@ -97,7 +98,12 @@ class Redactor:
         digits = re.sub(r"\D", "", match.group(0))
         if len(digits) < 10:
             return match.group(0)
-        return "[[CANDIDATE_PHONE]]" if digits[-10:] == self.phone_last10 else "[[OTHER_PHONE]]"
+        if digits[-10:] == self.phone_last10:
+            return "[[CANDIDATE_PHONE]]"
+        # Dates and timestamps ("2026-10-29 09:33", "2024-03 - 2024-04") are not phone numbers.
+        if DATE_LIKE_RE.match(match.group(0)):
+            return match.group(0)
+        return "[[OTHER_PHONE]]"
 
     def unredact(self, text: str) -> str:
         """Restore candidate placeholders only. OTHER_* stays redacted."""

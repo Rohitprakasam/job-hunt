@@ -68,3 +68,12 @@ def mark_exhausted(conn: sqlite3.Connection, model: str, now: datetime) -> datet
     until = next_pacific_midnight(now)
     db.set_flag(conn, exhausted_key(model), db.to_iso(until))
     return until
+
+
+def room(
+    conn: sqlite3.Connection, model: str, limit: ModelLimit, headroom: float, now: datetime
+) -> tuple[int, int]:
+    """Requests still allowed (this minute, today) under the headroom."""
+    minute = max(1, int(limit.rpm * headroom)) - _count_since(conn, model, now - timedelta(seconds=60))
+    day = max(1, int(limit.rpd * headroom)) - used_today(conn, model, now)
+    return max(0, minute), max(0, day)

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply</title>
+<style>.twin{opacity:0;position:absolute;height:1px;width:1px}.menu{border:1px solid #ccc}.menu[hidden]{display:none}</style>
+</head>
+<body>
+<form onsubmit="event.preventDefault(); window.__submitted = true;">
+  <div class="field"><label for="first_name">First Name*</label><input id="first_name" required></div>
+  <div class="field"><label for="email">Email*</label><input id="email" type="email" required></div>
+  <div class="file-upload">
+    <div class="label upload-label" id="upload-label-resume">Resume/CV*</div>
+    <button type="button">Attach</button>
+    <input type="file" id="resume" aria-label="Attach" required style="width:1px;height:1px">
+  </div>
+  <div class="field select">
+    <label id="q1-label" for="q1">Will you now or in the future require sponsorship for a visa to remain in your current country?*</label>
+    <div class="select__container">
+      <input id="q1" role="combobox" aria-labelledby="q1-label" aria-required="true" autocomplete="off" readonly
+             onclick="document.getElementById('q1-menu').hidden = false">
+      <div class="select__single-value" id="q1-value"></div>
+      <input class="twin" tabindex="-1" aria-hidden="true" required>
+    </div>
+    <div class="menu" id="q1-menu" role="listbox" hidden>
+      <div role="option" onclick="pick('q1', 'Yes')">Yes</div>
+      <div role="option" onclick="pick('q1', 'No')">No</div>
+    </div>
+  </div>
+  <div class="field select">
+    <label id="q2-label" for="q2">Have you previously worked at or consulted for Acme?*</label>
+    <div class="select__container">
+      <input id="q2" role="combobox" aria-labelledby="q2-label" aria-required="true" readonly
+             onclick="document.getElementById('q2-menu').hidden = false">
+      <div class="select__single-value" id="q2-value"></div>
+    </div>
+    <div class="menu" id="q2-menu" role="listbox" hidden>
+      <div role="option" onclick="pick('q2', 'Yes')">Yes</div>
+      <div role="option" onclick="pick('q2', 'No')">No</div>
+    </div>
+  </div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  function pick(id, value) {
+    document.getElementById(id).value = value;
+    document.getElementById(id + '-value').textContent = value;
+    document.getElementById(id + '-menu').hidden = true;
+  }
+</script>
+</body>
+</html>

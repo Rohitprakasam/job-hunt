@@ -1,13 +1,31 @@
-# Copy to search.yaml. Used from Phase 1 (discovery and filtering).
+# Copy to search.yaml. What to look for and the hard filters (a job failing one is never scored).
+# roles: search terms sent to JobSpy boards. Each role x location x site is one query every 3 h,
+# so keep this list short (LinkedIn blocks bursts).
 roles:
-  - System Administrator
-  - Linux Administrator
+  - Software Engineer
+  - Full Stack Developer
+  - Python Developer
   - Security Analyst
+# A job title must contain one of these words (plural forms match too). Empty = words of `roles`.
+# Software + security. Plain "engineer" is left out on purpose (it would let in mechanical, sales...).
+title_keywords:
+  [software, developer, sde, swe, programmer, backend, frontend, fullstack, full, stack, web, python,
+   react, javascript, typescript, java, api, application, platform, security, cybersecurity, soc,
+   appsec, devsecops, pentest, penetration, vapt, devops, cloud, sre, reliability, infrastructure,
+   linux, system, sysadmin, network]
 seniority: [intern, entry, junior]
+# Titles with these words are too senior. Descriptions asking for more than max_years_required are too.
+exclude_title_words: [senior, sr, lead, principal, staff, manager, director, head, architect, vp, iii, iv, sde3, sde4]
+max_years_required: 3
 locations: [Chennai, Bengaluru, Remote]
 remote_ok: true
 salary_floor: 300000
 currency: INR
 blocklist_companies: []
 blocklist_keywords: [unpaid, commission only]
-max_posting_age_days: 14
+max_posting_age_days: 30
+# JobSpy boards. Naukri and Indeed suit India; Glassdoor and Google are optional.
+jobspy_sites: [linkedin, indeed, naukri]
+jobspy_results_per_query: 20
+jobspy_hours_old: 72
+country_indeed: India

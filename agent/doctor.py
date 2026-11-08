@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -86,7 +88,11 @@ def check_config(ctx: Context) -> list[Check]:
         try:
             value = loader()
         except config.ConfigError as exc:
-            hint = "run: agent profile import" if name == "profile" else f"copy config/{name}.example.yaml"
+            hint = (
+                "fill config/profile.draft.yaml (agent profile from-tex), save as profile.yaml"
+                if name == "profile"
+                else f"copy config/{name}.example.yaml"
+            )
             out.append(Check(f"config:{name}", "fail", str(exc).splitlines()[0], hint))
             continue
         if name == "settings":
@@ -157,6 +163,57 @@ def check_killswitch(ctx: Context) -> Check:
     return Check("killswitch", "ok", "not stopped (local)")
 
 
+def check_browser(ctx: Context) -> Check:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        exe = pathlib.Path(pw.chromium.executable_path)
+    if not exe.exists():
+        return Check(
+            "browser",
+            "fail",
+            "Chromium for Playwright not installed",
+            r".venv\Scripts\python -m playwright install chromium",
+        )
+    mode = ctx.settings.apply.mode if ctx.settings else "?"
+    return Check("browser", "ok", f"Chromium ready; apply.mode = {mode}")
+
+
+def check_resume(ctx: Context) -> Check:
+    if ctx.settings is None or ctx.settings.resume.engine != "latex":
+        return Check("resume", "ok", "RenderCV from profile.yaml")
+    from agent.prepare import latex
+
+    template = paths.config_dir() / ctx.settings.resume.latex_template
+    if not template.exists():
+        return Check("resume", "fail", f"{template.name} not found", "put your LaTeX resume in config/")
+    tex = template.read_text(encoding="utf-8")
+    found = [n for n, rx in (("headline", latex.HEADLINE_RE), ("summary", latex.SUMMARY_RE), ("skills", latex.SKILLS_RE))
+             if rx.search(tex)]  # fmt: skip
+    engine = latex.find_engine(ctx.settings.resume.latex_command)
+    if engine is None:
+        return Check("resume", "fail", f"template ok ({', '.join(found)}); no LaTeX engine",
+                     "install Tectonic or MiKTeX (see README), or set resume.latex_command")  # fmt: skip
+    missing = {"headline", "summary", "skills"} - set(found)
+    status = "warn" if missing else "ok"
+    hint = f"not tailored (shape not found): {', '.join(sorted(missing))}" if missing else ""
+    return Check("resume", status, f"{template.name} via {engine.stem}; tailors {', '.join(found)}", hint)
+
+
+def check_answers(ctx: Context) -> Check:
+    if ctx.conn is None or db.current_version(ctx.conn) < db.latest_version():
+        return Check("answers", "skip", "needs the migrated database")
+    saved = ctx.conn.execute("SELECT count(*) FROM answers_bank").fetchone()[0]
+    pending = ctx.conn.execute("SELECT count(*) FROM pending_questions").fetchone()[0]
+    if saved == 0:
+        return Check("answers", "warn", "answer bank empty", "agent answers seed")
+    if pending:
+        return Check(
+            "answers", "warn", f"{saved} saved, {pending} questions waiting", "agent answers pending"
+        )
+    return Check("answers", "ok", f"{saved} saved answers")
+
+
 def check_git(_: Context) -> Check:
     try:
         tracked = subprocess.run(
@@ -184,7 +241,7 @@ def check_gemini_models(ctx: Context) -> Check:
         return Check("gemini:models", "fail", f"HTTP {response.status_code}", "check the API key")
     available = {m["name"].removeprefix("models/") for m in response.json().get("models", [])}
     llm = ctx.settings.llm
-    configured = [*llm.fast_models, *llm.strong_models, llm.embedding_model]
+    configured = [m for m in [*llm.fast_models, *llm.strong_models, llm.embedding_model] if "/" not in m]
     missing = [m for m in configured if m not in available]
     if missing:
         return Check(
@@ -194,6 +251,68 @@ def check_gemini_models(ctx: Context) -> Check:
             "remove them from settings.yaml",
         )
     return Check("gemini:models", "ok", f"{len(configured)} configured models available")
+
+
+def check_local_endpoints(ctx: Context) -> list[Check]:
+    out = []
+    llm = ctx.settings.llm
+    for name, ep in llm.local_endpoints.items():
+        token = sec.get_optional(ep.token_secret)
+        if not token:
+            out.append(
+                Check(
+                    f"llm:{name}",
+                    "fail",
+                    f"missing secret '{ep.token_secret}'",
+                    f"agent secrets set {ep.token_secret}",
+                )
+            )
+            continue
+        url = f"{ep.api_base.rstrip('/')}/models"
+        t0 = time.perf_counter()
+        try:
+            resp = httpx.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=min(ep.timeout_s, 20),
+            )
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                pulled = [m.get("id") for m in data if isinstance(m, dict)]
+                expected = [
+                    m.split("/", 1)[1]
+                    for m in [*llm.fast_models, *llm.strong_models, llm.embedding_model]
+                    if m.startswith(f"{name}/")
+                ]
+                missing = [m for m in expected if m not in pulled]
+                if missing:
+                    out.append(
+                        Check(
+                            f"llm:{name}",
+                            "warn",
+                            f"missing models: {', '.join(missing)} (latency {latency_ms}ms)",
+                            "docker exec ollama ollama pull <model>",
+                        )
+                    )
+                else:
+                    out.append(
+                        Check(
+                            f"llm:{name}",
+                            "ok",
+                            f"{len(pulled)} models available, latency {latency_ms}ms",
+                        )
+                    )
+            elif resp.status_code == 503:
+                retry_after = resp.headers.get("Retry-After", "unknown")
+                out.append(Check(f"llm:{name}", "warn", f"waking up (HTTP 503 Retry-After {retry_after})"))
+            elif resp.status_code == 401:
+                out.append(Check(f"llm:{name}", "fail", "HTTP 401 Unauthorized", "check the secret token"))
+            else:
+                out.append(Check(f"llm:{name}", "fail", f"HTTP {resp.status_code} from {url}"))
+        except Exception as exc:
+            out.append(Check(f"llm:{name}", "fail", mask_tokens(f"{type(exc).__name__}: {exc}")[:200]))
+    return out
 
 
 def check_gemini_calls(ctx: Context) -> list[Check]:
@@ -218,6 +337,63 @@ def check_gemini_calls(ctx: Context) -> list[Check]:
                 f"gemini:{tier}", "ok", f"{result.model}: {result.text.strip()[:20]!r}, {used}/{limit} today"
             )
         )
+    return out
+
+
+def check_cloud_providers(_: Context) -> list[Check]:
+    out = []
+    groq_key = sec.get_optional(sec.Secret.GROQ_API_KEY)
+    if groq_key:
+        try:
+            resp = httpx.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {groq_key}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                out.append(Check("llm:groq", "ok", "authenticated"))
+            else:
+                out.append(Check("llm:groq", "fail", f"HTTP {resp.status_code}"))
+        except Exception as exc:
+            out.append(Check("llm:groq", "fail", mask_tokens(str(exc))[:200]))
+    else:
+        out.append(Check("llm:groq", "skip", "GROQ_API_KEY not set"))
+
+    cf_token = sec.get_optional(sec.Secret.CLOUDFLARE_API_TOKEN)
+    cf_account = sec.get_optional(sec.Secret.CLOUDFLARE_ACCOUNT_ID)
+    if cf_token and cf_account:
+        try:
+            resp = httpx.get(
+                "https://api.cloudflare.com/client/v4/user/tokens/verify",
+                headers={"Authorization": f"Bearer {cf_token}"},
+                timeout=10,
+            )
+            if resp.status_code == 200 and resp.json().get("success"):
+                out.append(Check("llm:cloudflare", "ok", "authenticated (Workers AI)"))
+            else:
+                out.append(Check("llm:cloudflare", "fail", f"HTTP {resp.status_code}"))
+        except Exception as exc:
+            out.append(Check("llm:cloudflare", "fail", mask_tokens(str(exc))[:200]))
+    else:
+        out.append(Check("llm:cloudflare", "skip", "CLOUDFLARE_API_TOKEN or ACCOUNT_ID not set"))
+
+    or_key = sec.get_optional(sec.Secret.OPENROUTER_API_KEY)
+    if or_key:
+        try:
+            resp = httpx.get(
+                "https://openrouter.ai/api/v1/auth/key",
+                headers={"Authorization": f"Bearer {or_key}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                out.append(Check("llm:openrouter", "ok", "authenticated (:free models)"))
+            else:
+                out.append(Check("llm:openrouter", "fail", f"HTTP {resp.status_code}"))
+        except Exception as exc:
+            out.append(Check("llm:openrouter", "fail", mask_tokens(str(exc))[:200]))
+    else:
+        out.append(Check("llm:openrouter", "skip", "OPENROUTER_API_KEY not set"))
+
     return out
 
 
@@ -281,7 +457,8 @@ def check_whatsapp(ctx: Context) -> list[Check]:
     from agent.cloud import Cloud
     from agent.notify.whatsapp import ERROR_HINTS, WhatsApp, error_code
 
-    cloud = Cloud(sec.get(sec.Secret.MONGODB_URI), ctx.settings.mongo)
+    uri = sec.get_optional(sec.Secret.MONGODB_URI)
+    cloud = Cloud(uri, ctx.settings.mongo) if uri else None  # number + token still checkable without it
     wa = WhatsApp(ctx.settings.whatsapp, ctx.conn, cloud)
     out = []
     try:
@@ -310,11 +487,23 @@ def check_whatsapp(ctx: Context) -> list[Check]:
         except httpx.HTTPStatusError as exc:
             out.append(Check("whatsapp:token", "warn", f"debug_token error {error_code(exc.response)}"))
         is_open = wa.window_open()
-        out.append(
-            Check(
-                "whatsapp:window", "ok", "open (plain text is free)" if is_open else "closed: messages queue"
+        if cloud is None:
+            out.append(
+                Check(
+                    "whatsapp:window",
+                    "warn",
+                    "unknown without MongoDB: messages queue",
+                    "agent secrets set mongodb_uri",
+                )
             )
-        )
+        else:
+            out.append(
+                Check(
+                    "whatsapp:window",
+                    "ok",
+                    "open (plain text is free)" if is_open else "closed: messages queue",
+                )
+            )
         if ctx.send_test:
             if not is_open:
                 out.append(
@@ -330,12 +519,15 @@ def check_whatsapp(ctx: Context) -> list[Check]:
                 out.append(Check("whatsapp:send", "ok" if status == "sent" else "fail", status))
         return out
     finally:
-        cloud.close()
+        if cloud is not None:
+            cloud.close()
 
 
 def check_remote_stop(ctx: Context) -> Check:
     from agent.cloud import Cloud
 
+    if not sec.get_optional(sec.Secret.MONGODB_URI):
+        return Check("killswitch:remote", "skip", "needs mongodb_uri")
     cloud = Cloud(sec.get(sec.Secret.MONGODB_URI), ctx.settings.mongo)
     try:
         stop = cloud.read_control()
@@ -362,10 +554,15 @@ def run(offline: bool = False, send_test: bool = False) -> list[Check]:
         ("redaction", check_redaction),
         ("killswitch", check_killswitch),
         ("git", check_git),
+        ("browser", check_browser),
+        ("answers", check_answers),
+        ("resume", check_resume),
     ):
         _run(ctx, name, fn)
     online = (
         ("gemini:models", check_gemini_models),
+        ("local_endpoints", check_local_endpoints),
+        ("cloud_llm", check_cloud_providers),
         ("gemini:call", check_gemini_calls),
         ("mongo", check_mongo),
         ("whatsapp", check_whatsapp),

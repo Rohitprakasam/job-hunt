@@ -77,3 +77,24 @@ def test_log_file_is_masked_and_redacted(profile):
     assert "sk-abc" not in text and "user:pass" not in text
     assert "[[CANDIDATE_EMAIL]]" in text
     logging.getLogger().handlers.clear()
+
+
+def test_secrets_read_from_env(monkeypatch, isolated):
+    monkeypatch.setenv("JOB_AGENT_SECRET_LLM_TOKEN_ROHIT_2", "env-token-123")
+    assert sec.get("llm_token_rohit_2") == "env-token-123"
+    assert sec.get_optional("llm_token_rohit_2") == "env-token-123"
+
+    # Bare env names must be ignored
+    monkeypatch.setenv("MONGODB_URI", "bare_uri_should_be_ignored")
+    assert sec.get_optional(sec.Secret.MONGODB_URI) is None
+    monkeypatch.setenv("JOB_AGENT_SECRET_MONGODB_URI", "prefixed_uri_used")
+    assert sec.get(sec.Secret.MONGODB_URI) == "prefixed_uri_used"
+
+
+def test_set_secret_refuses_plaintext_keyring(monkeypatch):
+    class FakePlaintextKeyring:
+        pass
+
+    monkeypatch.setattr(sec.keyring, "get_keyring", lambda: FakePlaintextKeyring())
+    with pytest.raises(RuntimeError, match="refusing to store secret in plaintext keyring"):
+        sec.set_secret("test_secret", "some_value")

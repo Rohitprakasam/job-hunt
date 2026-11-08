@@ -1,0 +1,32 @@
+machines:
+  - name: rohit-1
+    role: master
+    workspace: default
+    machine_id: m_example_master_id
+    ssh_host: rohit-1
+  - name: rohit-2
+    role: fast-llm
+    workspace: default
+    machine_id: m_example_fast_llm_id
+    ssh_host: rohit-2
+  - name: rohit-3
+    role: strong-llm
+    workspace: default
+    machine_id: m_example_strong_llm_id
+    ssh_host: rohit-3
+  - name: rohit-4
+    role: uncensored-llm
+    workspace: default
+    machine_id: m_example_uncensored_id
+    ssh_host: rohit-4
+  - name: rohit-5
+    role: research
+    workspace: default
+    machine_id: m_example_research_id
+    ssh_host: rohit-5
+  - name: rohit-6
+    role: worker
+    workspace: default
+    machine_id: m_example_worker_id
+    ssh_host: rohit-6
+

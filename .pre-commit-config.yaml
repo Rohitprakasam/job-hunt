@@ -8,7 +8,12 @@ repos:
         name: block personal data and secrets files
         language: fail
         entry: "These files hold personal data or secrets and must never be committed:"
-        files: '(^|/)config/(profile|profile\.draft|search|companies|settings)\.yaml$|\.db(-wal|-shm)?$|client_secret.*\.json$|token.*\.json$|(^|/)\.env|secrets\.env$'
+        files: '(^|/)config/((profile|profile\.draft|search|companies|settings)\.yaml|contacts\.csv|(?!.*\.example\.tex$)[^/]+\.tex|[^/]+\.bak)$|\.db(-wal|-shm)?$|client_secret.*\.json$|token.*\.json$|(^|/)\.env|secrets\.env$'
+      - id: block-instabox-identifiers
+        name: block InstaBox credentials and machine ids
+        language: pygrep
+        entry: 'ibssh_[A-Za-z0-9]{8,}|m_[a-z0-9]{26}|[a-z0-9]{26}\.instabox\.tech'
+        exclude: '^(\.git/|uv\.lock|\.secrets\.baseline)'
       - id: detect-secrets
         name: detect-secrets
         language: system

@@ -1,0 +1,74 @@
+% FAKE example. Copy to config/resume.tex (gitignored) and replace with your own resume.
+% The agent tailors only: the italic headline line, the "Professional Summary" block (its
+% "Seeking a ... role." sentence and, optionally, light rewording) and the "Technical Skills" lines
+% (\item \textbf{Category:} a, b, c). Keep those three shapes; everything else is free.
+\documentclass[11pt,a4paper]{article}
+\usepackage[a4paper,top=1.2cm,bottom=1.1cm,left=1.6cm,right=1.6cm]{geometry}
+\usepackage{iftex}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{changepage}
+\usepackage{needspace}
+\usepackage{tabularx}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+\else
+  \usepackage{fontspec}
+\fi
+\definecolor{gold}{RGB}{105,74,8}
+\usepackage[hidelinks]{hyperref}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+\newcommand{\sectionhead}[2][0pt]{%
+  \Needspace{6\baselineskip}\vspace{5pt}\noindent\hspace{#1}%
+  {\color{gold}\bfseries\fontsize{14}{16}\selectfont #2}\hspace{4pt}%
+  {\color{gold}\leaders\hrule height 0.6pt depth 0pt\hfill\kern0pt}\par\vspace{2pt}}
+\setlist[itemize]{label=\textbullet,leftmargin=*,itemsep=1pt,parsep=0pt,topsep=1pt,partopsep=0pt}
+\newcommand{\role}[3]{%
+  \noindent\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}X@{\hspace{10pt}}r@{}}
+    {\bfseries\large #1} & {\small #3}\\[1pt]
+    {\small\itshape #2} & \\
+  \end{tabularx}\par\vspace{2pt}}
+
+\begin{document}
+
+{\color{gold}\bfseries\fontsize{25}{29}\selectfont TESTA CANDIDATO\ \ Q}\\
+{\color{gold}\small Chennai, India $|$ +91 90000 00001 $|$ \href{mailto:testa.candidato@example.com}{testa.candidato@example.com}}
+
+\vspace{6pt}
+\noindent{\itshape\fontsize{11.5}{14}\selectfont Software Engineer $|$ Full-Stack Developer $|$ Python (FastAPI) $|$ React.js / Next.js $|$ Cyber}
+
+\sectionhead{Professional Summary}
+\begin{adjustwidth}{0.5cm}{0pt}
+\small
+Computer Engineering graduate (B.E., 2026) and Developer Intern. Building a \textbf{React.js, TypeScript}
+and \textbf{FastAPI} stack backed by \textbf{PostgreSQL}, using \textbf{Docker and CI/CD}. Kept 5+ Linux servers
+at 99.9\% uptime. Seeking a Software Engineer role.
+\end{adjustwidth}
+
+\sectionhead[0.2cm]{Technical Skills}
+\begin{adjustwidth}{0.6cm}{0pt}
+\small
+\begin{itemize}
+  \item \textbf{Languages:} Java, Python, JavaScript, TypeScript, SQL, Bash
+  \item \textbf{Backend \& APIs:} FastAPI, Spring Boot, RESTful APIs, JWT, WebSockets
+  \item \textbf{Frontend:} React.js, Next.js, Tailwind CSS, HTML, CSS
+  \item \textbf{Databases:} PostgreSQL, MongoDB, SQL
+  \item \textbf{DevOps \& Cloud:} Docker, CI/CD, Git, AWS (CloudFront, WAF), Vercel
+  \item \textbf{Infrastructure \& Security:} Linux Administration (RHCSA), Wireshark, Nmap, burp suite
+\end{itemize}
+\end{adjustwidth}
+
+\sectionhead[0.2cm]{Work Experience}
+\begin{adjustwidth}{0.6cm}{0pt}
+\role{Developer Intern}{Example Corp $|$ Chennai}{Jul~2026~--~Present}
+\small
+\begin{itemize}
+  \item Migrated a legacy PHP portal to React.js, TypeScript and a Python FastAPI backend with PostgreSQL.
+  \item Containerized services with Docker and CI/CD pipelines.
+\end{itemize}
+\end{adjustwidth}
+
+\end{document}

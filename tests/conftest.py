@@ -34,8 +34,13 @@ class MemoryKeyring(KeyringBackend):
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Every test gets its own agent home, stop file and in-memory keychain."""
+    import os
+
     monkeypatch.setenv("JOB_AGENT_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("JOB_AGENT_STOP_FILE", str(tmp_path / "STOP"))
+    for k in list(os.environ.keys()):
+        if k.startswith("JOB_AGENT_SECRET_"):
+            monkeypatch.delenv(k, raising=False)
     backend = MemoryKeyring()
     previous = keyring.get_keyring()
     keyring.set_keyring(backend)

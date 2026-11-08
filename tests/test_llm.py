@@ -154,3 +154,200 @@ def test_auth_error_stops(client, provider):
     }
     with pytest.raises(llm.LLMError, match="API key"):
         client.complete("test", "fast", [{"role": "user", "content": "hi"}], 50)
+
+
+def test_route_gemini_and_local_endpoints(client, monkeypatch):
+    from agent.config import LocalEndpoint
+
+    # Bare model routes to gemini
+    model, base, key, timeout = client._route("gemini-3.5-flash-lite")
+    assert model == "gemini/gemini-3.5-flash-lite"
+    assert base is None
+    assert key == "test-key"
+    assert timeout == client.llm.request_timeout_s
+
+    # Local endpoint configured
+    client.llm.local_endpoints["rohit-test"] = LocalEndpoint(
+        api_base="https://test.instabox.tech/v1",
+        token_secret="test_secret",  # pragma: allowlist secret
+        timeout_s=45,
+    )
+    monkeypatch.setenv("JOB_AGENT_SECRET_TEST_SECRET", "bearer-12345")
+
+    model, base, key, timeout = client._route("rohit-test/qwen2.5:3b")
+    assert model == "openai/qwen2.5:3b"
+    assert base == "https://test.instabox.tech/v1"
+    assert key == "bearer-12345"
+    assert timeout == 45
+
+    # Unknown endpoint raises
+    with pytest.raises(llm.LLMError, match="unknown local endpoint"):
+        client._route("nonexistent/model")
+
+
+def test_prewarm_skips_missing_secret(client):
+    from agent.config import LocalEndpoint
+
+    client.llm.local_endpoints["rohit-unauthed"] = LocalEndpoint(
+        api_base="https://unauthed.instabox.tech/v1",
+        token_secret="missing_secret_key",  # pragma: allowlist secret
+        timeout_s=10,
+    )
+    status = client.prewarm()
+    assert status.get("rohit-unauthed") is False
+    assert "rohit-unauthed" in client._skipped_endpoints
+
+
+def test_finish_reason_length_moves_to_next_model(client, provider, monkeypatch):
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "gemini/gemini-3.5-flash-lite":
+            # Returns truncated response
+            resp = _response("truncated json...")
+            resp.choices[0].finish_reason = "length"
+            return resp
+        return _response("valid fallback response")
+
+    monkeypatch.setattr(llm.litellm, "completion", fake_completion)
+
+    res = client.complete("test", "fast", [{"role": "user", "content": "hi"}], max_tokens=100)
+    assert res is not None
+    assert res.text == "valid fallback response"
+    assert res.model == "gemini-3.1-flash-lite"
+    assert len(calls) == 2
+
+
+def test_permission_denied_endpoint_skips_and_falls_back(client, monkeypatch):
+    import httpx
+
+    from agent.config import LocalEndpoint
+
+    client.llm.local_endpoints["rohit-denied"] = LocalEndpoint(
+        api_base="https://denied.instabox.tech/v1",
+        token_secret="tok_secret",  # pragma: allowlist secret
+        timeout_s=10,
+    )
+    monkeypatch.setenv("JOB_AGENT_SECRET_TOK_SECRET", "fake-token")
+
+    def fake_completion(**kwargs):
+        if kwargs.get("model") == "openai/qwen2.5:3b":
+            exc_cls = getattr(llm.litellm, "PermissionDeniedError", llm.litellm.AuthenticationError)
+            mock_resp = httpx.Response(403, request=httpx.Request("POST", "https://denied.instabox.tech/v1"))
+            try:
+                raise exc_cls("403 Forbidden", response=mock_resp, llm_provider="openai", model="m")
+            except TypeError:
+                raise exc_cls("403 Forbidden", llm_provider="openai", model="m") from None
+        return _response("ok from fallback")
+
+    monkeypatch.setattr(llm.litellm, "completion", fake_completion)
+    object.__setattr__(client.llm, "fast_models", ["rohit-denied/qwen2.5:3b", "gemini-3.5-flash-lite"])
+
+    res = client.complete("test", "fast", [{"role": "user", "content": "hi"}], max_tokens=100)
+    assert res is not None
+    assert res.text == "ok from fallback"
+    assert client.is_endpoint_skipped("rohit-denied") is True
+
+
+def test_prewarm_hang_marks_skipped_and_gets_zero_calls(client, monkeypatch):
+    import requests
+
+    from agent.config import LocalEndpoint
+
+    client.llm.local_endpoints["rohit-hang"] = LocalEndpoint(
+        api_base="https://hang.instabox.tech/v1",
+        token_secret="hang_secret",  # pragma: allowlist secret
+        timeout_s=5,
+    )
+    monkeypatch.setenv("JOB_AGENT_SECRET_HANG_SECRET", "fake-token")
+
+    def fake_get(url, **kwargs):
+        raise requests.Timeout("mock timeout")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(client, "_sleep", lambda s: None)
+
+    status = client.prewarm(timeout_total_s=0.1)
+    assert status.get("rohit-hang") is False
+    assert client.is_endpoint_skipped("rohit-hang") is True
+
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs["model"])
+        return _response("ok from fallback")
+
+    monkeypatch.setattr(llm.litellm, "completion", fake_completion)
+    object.__setattr__(client.llm, "fast_models", ["rohit-hang/qwen2.5:3b", "gemini-3.5-flash-lite"])
+    res = client.complete("test", "fast", [{"role": "user", "content": "hi"}], max_tokens=100)
+    assert res is not None
+    assert "openai/qwen2.5:3b" not in calls
+    assert calls == ["gemini/gemini-3.5-flash-lite"]
+
+
+def test_prewarm_401_403_skips_endpoint(client, monkeypatch):
+    import requests
+
+    from agent.config import LocalEndpoint
+
+    client.llm.local_endpoints["rohit-auth-fail"] = LocalEndpoint(
+        api_base="https://authfail.instabox.tech/v1",
+        token_secret="auth_secret",  # pragma: allowlist secret
+        timeout_s=5,
+    )
+    monkeypatch.setenv("JOB_AGENT_SECRET_AUTH_SECRET", "fake-token")
+
+    class MockResponse:
+        status_code = 401
+        headers = {}
+
+    monkeypatch.setattr(requests, "get", lambda url, **kwargs: MockResponse())
+    monkeypatch.setattr(client, "_sleep", lambda s: None)
+
+    status = client.prewarm(timeout_total_s=1.0)
+    assert status.get("rohit-auth-fail") is False
+    assert client.is_endpoint_skipped("rohit-auth-fail") is True
+
+
+def test_cloud_providers_route_and_missing_key_skip(client, monkeypatch):
+    from agent.config import ModelLimit
+
+    # Set up models in settings limits
+    client.llm.limits["groq/qwen/qwen3.8-27b"] = ModelLimit(rpm=30, rpd=1000)
+    client.llm.limits["cloudflare/@cf/meta/llama-3.1-8b-instruct"] = ModelLimit(rpm=30, rpd=1000)
+    client.llm.limits["openrouter/liquid/lfm-2.5-2.6b:free"] = ModelLimit(rpm=10, rpd=50)
+
+    # 1. With groq key set
+    monkeypatch.setenv("JOB_AGENT_SECRET_GROQ_API_KEY", "fake-groq-key")
+    routed, base, key, _ = client._route("groq/qwen/qwen3.8-27b")
+    assert routed == "groq/qwen/qwen3.8-27b"
+    assert key == "fake-groq-key"
+
+    # 2. With cloudflare key set
+    monkeypatch.setenv("JOB_AGENT_SECRET_CLOUDFLARE_API_TOKEN", "fake-cf-token")
+    monkeypatch.setenv("JOB_AGENT_SECRET_CLOUDFLARE_ACCOUNT_ID", "fake-cf-account")
+    routed, base, key, _ = client._route("cloudflare/@cf/meta/llama-3.1-8b-instruct")
+    assert routed == "cloudflare/@cf/meta/llama-3.1-8b-instruct"
+    assert base == "https://api.cloudflare.com/client/v4/accounts/fake-cf-account/ai/run"
+    assert key == "fake-cf-token"
+
+    # 3. Missing key skips rung without crashing
+    monkeypatch.delenv("JOB_AGENT_SECRET_OPENROUTER_API_KEY", raising=False)
+    object.__setattr__(
+        client.llm,
+        "fast_models",
+        ["openrouter/liquid/lfm-2.5-2.6b:free", "gemini-3.5-flash-lite"],
+    )
+
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs["model"])
+        return _response("ok from fallback")
+
+    monkeypatch.setattr(llm.litellm, "completion", fake_completion)
+    res = client.complete("test", "fast", [{"role": "user", "content": "hello"}], max_tokens=100)
+    assert res is not None
+    # openrouter was skipped because no key, fell through to gemini
+    assert calls == ["gemini/gemini-3.5-flash-lite"]

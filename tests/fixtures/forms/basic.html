@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply: Security Analyst</title></head>
+<body>
+<h1>Security Analyst</h1>
+<form id="application" onsubmit="event.preventDefault(); window.__submitted = true; document.body.innerHTML = '<h1>Thank you for applying!</h1>';">
+  <div class="field"><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
+  <div class="field"><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></div>
+  <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
+  <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel"></div>
+  <div class="field"><label for="resume">Resume/CV *</label><input id="resume" name="resume" type="file" required></div>
+  <div class="field"><label for="linkedin">LinkedIn Profile</label><input id="linkedin" name="linkedin"></div>
+  <div class="field"><label for="auth">Are you legally authorized to work in India? *</label>
+    <select id="auth" name="auth" required><option value="">Select...</option><option>Yes</option><option>No</option></select></div>
+  <fieldset><legend>Will you now or in the future require sponsorship for employment visa status? *</legend>
+    <input type="radio" id="sp_yes" name="sponsor" value="yes" required><label for="sp_yes">Yes</label>
+    <input type="radio" id="sp_no" name="sponsor" value="no"><label for="sp_no">No</label>
+  </fieldset>
+  <div class="field"><label for="cover">Cover Letter</label><textarea id="cover" name="cover"></textarea></div>
+  <div class="field"><label for="hobby">Anything else you'd like to share?</label><input id="hobby" name="hobby"></div>
+  <div class="field"><input type="checkbox" id="consent" name="consent" required><label for="consent">I agree to the privacy policy *</label></div>
+  <button type="submit">Submit application</button>
+</form>
+</body>
+</html>

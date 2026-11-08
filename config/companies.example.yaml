@@ -1,7 +1,29 @@
-# Copy to companies.yaml. Watchlist of employers whose ATS boards are polled directly (Phase 1).
+# Copy to companies.yaml. Employers whose public ATS job boards are polled directly every hour.
+# These 20 boards were checked on 29 Oct 2026: each answered and listed jobs in India.
+# Add more: open a company's careers page; if the "Apply" link goes to
+#   job-boards.greenhouse.io/<slug>, jobs.lever.co/<slug> or jobs.ashbyhq.com/<slug>,
+# add it here with that ats_type and slug. A wrong slug pauses only that company (after 3 failures).
 companies:
-  - name: Example Co
-    domain: example.com
-    ats_type: greenhouse
-    ats_slug: exampleco
-    watchlist: true
+  # Security / infrastructure
+  - {name: Okta, ats_type: greenhouse, ats_slug: okta, domain: okta.com}
+  - {name: Zscaler, ats_type: greenhouse, ats_slug: zscaler, domain: zscaler.com}
+  - {name: Netskope, ats_type: greenhouse, ats_slug: netskope, domain: netskope.com}
+  - {name: Rubrik, ats_type: greenhouse, ats_slug: rubrik, domain: rubrik.com}
+  - {name: Druva, ats_type: greenhouse, ats_slug: druva, domain: druva.com}
+  - {name: Elastic, ats_type: greenhouse, ats_slug: elastic, domain: elastic.co}
+  - {name: MongoDB, ats_type: greenhouse, ats_slug: mongodb, domain: mongodb.com}
+  - {name: Databricks, ats_type: greenhouse, ats_slug: databricks, domain: databricks.com}
+  - {name: GitLab, ats_type: greenhouse, ats_slug: gitlab, domain: gitlab.com}
+  - {name: Samsara, ats_type: greenhouse, ats_slug: samsara, domain: samsara.com}
+  - {name: Twilio, ats_type: greenhouse, ats_slug: twilio, domain: twilio.com}
+  - {name: Toast, ats_type: greenhouse, ats_slug: toast, domain: toasttab.com}
+  # Fintech
+  - {name: Stripe, ats_type: greenhouse, ats_slug: stripe, domain: stripe.com}
+  - {name: Coinbase, ats_type: greenhouse, ats_slug: coinbase, domain: coinbase.com}
+  - {name: Paytm, ats_type: lever, ats_slug: paytm, domain: paytm.com}
+  - {name: Zeta, ats_type: lever, ats_slug: zeta, domain: zeta.tech}
+  - {name: CRED, ats_type: lever, ats_slug: cred, domain: cred.club}
+  # Consumer / AI
+  - {name: Meesho, ats_type: lever, ats_slug: meesho, domain: meesho.com}
+  - {name: Sarvam AI, ats_type: ashby, ats_slug: sarvam, domain: sarvam.ai}
+  - {name: Atlan, ats_type: ashby, ats_slug: atlan, domain: atlan.com}

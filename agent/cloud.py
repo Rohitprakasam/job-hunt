@@ -26,7 +26,7 @@ HEARTBEAT_VALIDATOR = {
         "required": ["_id", "sent_at", "version", "uptime_s", "last_run_ok"],
         "additionalProperties": False,
         "properties": {
-            "_id": {"enum": ["worker"]},
+            "_id": {"enum": ["worker", "master"]},
             "sent_at": {"bsonType": "date"},
             "version": {"bsonType": "string", "maxLength": 32},
             "uptime_s": {"bsonType": ["int", "long"], "minimum": 0},
@@ -48,6 +48,36 @@ CONTROL_VALIDATOR = {
         },
     }
 }
+
+
+def _bson_schema(spec: Any) -> dict[str, Any]:
+    """Mongo $jsonSchema for the sanitizer's allow-list (see agent/report/sanitize.py)."""
+    if isinstance(spec, dict):
+        return {
+            "bsonType": "object",
+            "required": list(spec),
+            "additionalProperties": False,
+            "properties": {k: _bson_schema(v) for k, v in spec.items()},
+        }
+    if isinstance(spec, list):
+        return {"bsonType": "array", "maxItems": 16, "items": _bson_schema(spec[0])}
+    if isinstance(spec, tuple):
+        return {"enum": list(spec)}
+    if spec is bool:
+        return {"bsonType": "bool"}
+    if spec is int:
+        return {"bsonType": ["int", "long"], "minimum": 0}
+    return {"bsonType": "string", "maxLength": 32}
+
+
+def snapshot_validator() -> dict[str, Any]:
+    from agent.report.sanitize import ALLOWED
+
+    schema = _bson_schema(ALLOWED)
+    schema["required"] = ["_id", *schema["required"]]
+    schema["properties"]["_id"] = {"bsonType": "string", "pattern": r"^(latest|\d{4}-\d{2}-\d{2})$"}
+    return {"$jsonSchema": schema}
+
 
 VALIDATORS = {"heartbeat": HEARTBEAT_VALIDATOR, "control": CONTROL_VALIDATOR}
 
@@ -96,7 +126,7 @@ class Cloud:
         """Create (or update) the validated collections and seed the control doc. Idempotent."""
         db = self.agent_db
         done = []
-        for name, validator in VALIDATORS.items():
+        for name, validator in {**VALIDATORS, "snapshot": snapshot_validator()}.items():
             try:
                 db.create_collection(name, validator=validator, validationAction="error")
             except CollectionInvalid:
@@ -114,7 +144,7 @@ class Cloud:
 
     # ------------------------------------------------------------ agent data
 
-    def write_heartbeat(self, uptime_s: int, last_run_ok: bool) -> bool:
+    def write_heartbeat(self, uptime_s: int, last_run_ok: bool, node_id: str = "worker") -> bool:
         doc = {
             "sent_at": self._now(),
             "version": __version__,
@@ -122,7 +152,41 @@ class Cloud:
             "last_run_ok": last_run_ok,
         }
         result = self._soft(
-            "heartbeat", lambda: self.agent_db["heartbeat"].replace_one({"_id": "worker"}, doc, upsert=True)
+            "heartbeat", lambda: self.agent_db["heartbeat"].replace_one({"_id": node_id}, doc, upsert=True)
+        )
+        return result is not None
+
+    def write_cluster(self, payload: dict[str, Any]) -> bool:
+        """Writes sanitized cluster status to job_agent.cluster without touching snapshot or worker heartbeat."""
+        doc = {"_id": "latest", **payload}
+        result = self._soft(
+            "cluster", lambda: self.agent_db["cluster"].replace_one({"_id": "latest"}, doc, upsert=True)
+        )
+        return result is not None
+
+    def write_snapshot(self, payload: dict[str, Any], keep_days: int = 90) -> bool:
+        """Latest snapshot plus one per day (90-day history). Payload must already be sanitized."""
+        from agent.report.sanitize import validate
+
+        validate(payload)
+        day = payload["sent_at"][:10]
+        snapshots = self.agent_db["snapshot"]
+
+        def write() -> bool:
+            snapshots.replace_one({"_id": "latest"}, {"_id": "latest", **payload}, upsert=True)
+            snapshots.replace_one({"_id": day}, {"_id": day, **payload}, upsert=True)
+            cutoff = (self._now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+            snapshots.delete_many({"_id": {"$lt": cutoff, "$ne": "latest"}})
+            return True
+
+        return bool(self._soft("snapshot", write))
+
+    def set_control(self, stop: bool, set_by: str = "cli") -> bool:
+        result = self._soft(
+            "set_control",
+            lambda: self.agent_db["control"].replace_one(
+                {"_id": "control"}, {"stop": stop, "set_at": self._now(), "set_by": set_by}, upsert=True
+            ),
         )
         return result is not None
 
@@ -166,3 +230,45 @@ class Cloud:
             return data
 
         return self._soft("read_portfolio", query)
+
+    # ------------------------------------------------------------ cluster machines & metrics
+
+    def write_machine_metrics(self, node_name: str, metrics: dict[str, Any]) -> bool:
+        doc = {
+            "_id": node_name,
+            "name": node_name,
+            "updated_at": self._now(),
+            **metrics,
+        }
+        result = self._soft(
+            "machine_metrics",
+            lambda: self.agent_db["machines"].replace_one({"_id": node_name}, doc, upsert=True),
+        )
+        return result is not None
+
+    def read_machine_metrics(self, node_name: str | None = None) -> list[dict[str, Any]]:
+        def query() -> list[dict[str, Any]]:
+            if node_name:
+                doc = self.agent_db["machines"].find_one({"_id": node_name})
+                return [doc] if doc else []
+            return list(self.agent_db["machines"].find({}))
+
+        res = self._soft("read_machine_metrics", query)
+        return res if res is not None else []
+
+    def read_inbox(self) -> list[dict[str, Any]]:
+        """Read pending user commands from job_agent.inbox."""
+
+        def query() -> list[dict[str, Any]]:
+            return list(self.agent_db["inbox"].find({}).sort("at", 1))
+
+        res = self._soft("read_inbox", query)
+        return res if res is not None else []
+
+    def delete_inbox_item(self, item_id: Any) -> bool:
+        """Delete processed inbox command."""
+        result = self._soft(
+            "delete_inbox_item",
+            lambda: self.agent_db["inbox"].delete_one({"_id": item_id}),
+        )
+        return result is not None

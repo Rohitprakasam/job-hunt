@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from enum import StrEnum
 from pathlib import Path
@@ -21,9 +22,21 @@ class Secret(StrEnum):
     WHATSAPP_TO_NUMBER = "whatsapp_to_number"
     WHATSAPP_BUSINESS_ACCOUNT_ID = "whatsapp_business_account_id"
     MONGODB_URI = "mongodb_uri"
+    GROQ_API_KEY = "groq_api_key"  # pragma: allowlist secret
+    OPENROUTER_API_KEY = "openrouter_api_key"  # pragma: allowlist secret
+    CLOUDFLARE_API_TOKEN = "cloudflare_api_token"  # pragma: allowlist secret
+    CLOUDFLARE_ACCOUNT_ID = "cloudflare_account_id"
+    MISTRAL_API_KEY = "mistral_api_key"  # pragma: allowlist secret
 
 
-REQUIRED: tuple[Secret, ...] = tuple(Secret)
+REQUIRED: tuple[Secret, ...] = (
+    Secret.GEMINI_API_KEY,
+    Secret.WHATSAPP_TOKEN,
+    Secret.WHATSAPP_PHONE_NUMBER_ID,
+    Secret.WHATSAPP_TO_NUMBER,
+    Secret.WHATSAPP_BUSINESS_ACCOUNT_ID,
+    Secret.MONGODB_URI,
+)
 
 # .env name -> keychain name. Anything not listed here is never imported.
 ENV_IMPORT_MAP: dict[str, Secret] = {
@@ -56,18 +69,44 @@ class SecretTooLong(ValueError):
     pass
 
 
+def _from_env(name: str) -> str | None:
+    raw = str(name).strip()
+    clean = re.sub(r"[^A-Za-z0-9_]", "_", raw).upper()
+    return os.getenv(f"JOB_AGENT_SECRET_{clean}") or None
+
+
 def get(name: Secret | str) -> str:
-    value = keyring.get_password(SERVICE, str(name))
+    env_val = _from_env(str(name))
+    if env_val:
+        return env_val
+    try:
+        value = keyring.get_password(SERVICE, str(name))
+    except Exception as exc:
+        raise MissingSecret(str(name)) from exc
     if not value:
         raise MissingSecret(str(name))
     return value
 
 
 def get_optional(name: Secret | str) -> str | None:
-    return keyring.get_password(SERVICE, str(name)) or None
+    env_val = _from_env(str(name))
+    if env_val:
+        return env_val
+    try:
+        return keyring.get_password(SERVICE, str(name)) or None
+    except Exception:
+        return None
 
 
 def set_secret(name: Secret | str, value: str) -> None:
+    kr = keyring.get_keyring()
+    kr_name = kr.__class__.__name__.lower()
+    if "plaintext" in kr_name:
+        clean = re.sub(r"[^A-Za-z0-9_]", "_", str(name)).upper()
+        raise RuntimeError(
+            f"refusing to store secret in plaintext keyring ({kr.__class__.__name__}); "
+            f"set JOB_AGENT_SECRET_{clean} in environment instead"
+        )
     value = value.strip()
     if not value:
         raise ValueError("empty value")
@@ -87,6 +126,10 @@ def delete(name: Secret | str) -> bool:
 
 
 def status() -> dict[str, bool]:
+    return {s.value: get_optional(s) is not None for s in REQUIRED}
+
+
+def all_status() -> dict[str, bool]:
     return {s.value: get_optional(s) is not None for s in Secret}
 
 

@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: uv sync --locked --python 3.14
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Browser for the form tests
+        run: uv run python -m playwright install chromium
+      # Offline: fake profile, in-memory keychain, local form fixtures. No secrets are used.
+      - name: Tests
+        run: uv run pytest -q -p no:warnings

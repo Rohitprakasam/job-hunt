@@ -82,6 +82,44 @@ class WhatsApp:
         if not self.window_open():
             self._record(kind, body, priority, ref_id, "queued")
             return "queued"
+        status, error = self._post(body)
+        self._record(kind, body, priority, ref_id, status, error=error)
+        return status
+
+    def flush(self, limit: int = 10) -> dict[str, int]:
+        """Send queued messages while the window is open: highest priority first, then oldest.
+        Only the newest queued digest is kept; older ones are dropped as stale."""
+        counts = {"sent": 0, "failed": 0, "dropped": 0, "left": 0}
+        digests = self.conn.execute(
+            "SELECT id FROM notifications WHERE status = 'queued' AND kind = 'digest' ORDER BY id DESC"
+        ).fetchall()
+        for row in digests[1:]:
+            self.conn.execute("UPDATE notifications SET status = 'dropped' WHERE id = ?", (row["id"],))
+            counts["dropped"] += 1
+        if not self.window_open():
+            counts["left"] = self._queued_count()
+            return counts
+        rows = self.conn.execute(
+            "SELECT id, body FROM notifications WHERE status = 'queued' ORDER BY priority DESC, id LIMIT ?",
+            (limit,),
+        ).fetchall()
+        for row in rows:
+            status, error = self._post(row["body"])
+            if status == "queued":  # window closed mid-way (131047) or network: stop, keep the rest
+                self.conn.execute("UPDATE notifications SET error_code = ? WHERE id = ?", (error, row["id"]))
+                break
+            self.conn.execute(
+                "UPDATE notifications SET status = ?, error_code = ?, sent_at = ? WHERE id = ?",
+                (status, error, db.to_iso(self._now()) if status == "sent" else None, row["id"]),
+            )
+            counts[status] += 1
+        counts["left"] = self._queued_count()
+        return counts
+
+    def _queued_count(self) -> int:
+        return self.conn.execute("SELECT count(*) FROM notifications WHERE status = 'queued'").fetchone()[0]
+
+    def _post(self, body: str) -> tuple[SendStatus, str | None]:
         payload = {
             "messaging_product": "whatsapp",
             "to": self._secret(Secret.WHATSAPP_TO_NUMBER),
@@ -96,19 +134,15 @@ class WhatsApp:
             )
         except httpx.HTTPError as exc:
             log.error("whatsapp send failed: %s", type(exc).__name__)
-            self._record(kind, body, priority, ref_id, "queued", error="network")
-            return "queued"
+            return "queued", "network"
         if response.status_code == 200:
-            self._record(kind, body, priority, ref_id, "sent")
-            return "sent"
+            return "sent", None
         code = error_code(response)
         if code == 131047:
             self._mark_window_closed()
-            self._record(kind, body, priority, ref_id, "queued", error="131047")
-            return "queued"
+            return "queued", "131047"
         log.error("whatsapp send rejected: code=%s hint=%s", code, ERROR_HINTS.get(code or 0, "-"))
-        self._record(kind, body, priority, ref_id, "failed", error=str(code))
-        return "failed"
+        return "failed", str(code)
 
     def _mark_window_closed(self) -> None:
         db.set_flag(self.conn, WINDOW_CLOSED_FLAG, db.to_iso(self._now() + timedelta(hours=1)))
