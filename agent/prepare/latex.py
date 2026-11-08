@@ -377,13 +377,14 @@ def tailor(
     if summary_override:
         summary = SUMMARY_RE.search(out.tex)
         if summary:
-            out.tex = (
-                out.tex[: summary.start(2)]
-                + "\n"
-                + summary_override.strip()
-                + "\n"
-                + out.tex[summary.end(2) :]
+            clean_s = summary_override.strip()
+            article = "an" if title and title[0].lower() in "aeiou" else "a"
+            seeking_sent = (
+                f"Seeking {article} {escape(title)} role at {escape(job['company'])}." if title else ""
             )
+            if seeking_sent and "seeking" not in clean_s.lower():
+                clean_s += f" {seeking_sent}"
+            out.tex = out.tex[: summary.start(2)] + "\n" + clean_s + "\n" + out.tex[summary.end(2) :]
             out.changes.append("summary: reworded toward the job's terms")
     elif settings.llm_summary:
         out.tex, out.problems, note = llm_summary(client, out.tex, job, profile, run_id)
