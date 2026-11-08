@@ -196,6 +196,17 @@ def fill(page, planned: list[Planned]) -> None:
             loc.fill(value)
 
 
+def find_fields(page, container_selector: str | None = None) -> list[Field]:
+    """Convenience helper to extract visible fields using EXTRACT_JS."""
+    raw = page.evaluate(EXTRACT_JS)
+    return [Field.from_js(rf) for rf in raw]
+
+
+def fill_form(page, planned: list[Planned]) -> None:
+    """Convenience alias for fill()."""
+    fill(page, planned)
+
+
 def _choose_combobox(page, loc, f: Field, value: str) -> None:
     """Open the dropdown, read its real options, pick the one that matches exactly (yes/no aware)."""
     loc.click()

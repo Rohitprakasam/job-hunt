@@ -120,7 +120,9 @@ def apply(
     if not clicked:
         return "failed", "could not click Easy Apply button", None
 
-    modal_selector = "div.jobs-easy-apply-modal, div[role='dialog']"
+    modal_selector = (
+        "dialog, div[role='dialog'], [role='dialog'], div.jobs-easy-apply-modal, .jobs-easy-apply-modal"
+    )
     try:
         page.wait_for_selector(modal_selector, timeout=8000)
     except Exception:
@@ -148,20 +150,30 @@ def apply(
             page.screenshot(path=str(screenshot_path))
             return "confirmed", None, screenshot_path
 
-        # 1. Resume upload if an input[type=file] is present
+        # 1. Resume upload if present
         try:
-            file_inputs = page.query_selector_all(f"{modal_selector} input[type='file']")
-            for fi in file_inputs:
-                resume_path = app["resume_path"] if "resume_path" in app.keys() else None
-                if resume_path and os.path.exists(resume_path):
+            resume_path = app["resume_path"] if "resume_path" in app.keys() and app["resume_path"] else None
+            if resume_path and os.path.exists(resume_path):
+                file_inputs = page.query_selector_all(f"{modal_selector} input[type='file']")
+                for fi in file_inputs:
                     fi.set_input_files(str(resume_path))
-                    page.wait_for_timeout(1500)
+                    page.wait_for_timeout(1000)
+                if not file_inputs:
+                    upload_btn = page.query_selector(
+                        f"{modal_selector} button:has-text('Upload resume'), {modal_selector} [aria-label*='Upload resume']"
+                    )
+                    if upload_btn and upload_btn.is_visible():
+                        with page.expect_file_chooser(timeout=5000) as fc_info:
+                            upload_btn.click()
+                        fc_info.value.set_files(str(resume_path))
+                        page.wait_for_timeout(2000)
         except Exception as file_exc:
             log.warning("error attaching resume on LinkedIn: %s", file_exc)
 
         # 2. Form inputs in current modal step
         try:
-            fields = form.find_fields(page, modal_selector)
+            raw_fields = page.evaluate(form.EXTRACT_JS)
+            fields = [form.Field.from_js(rf) for rf in raw_fields if rf.get("label") != "Select language"]
             if fields:
                 resume_p = (
                     Path(app["resume_path"]) if "resume_path" in app.keys() and app["resume_path"] else None
@@ -174,10 +186,10 @@ def apply(
                 )
                 # Answer gate check
                 for f in planned:
-                    if f.field.required and (f.value is None or str(f.value).strip() == ""):
+                    if f.field.required and (f.plan.value is None or str(f.plan.value).strip() == ""):
                         answers.record_pending(conn, f.field.label, None)
                         return "skipped", f"unanswerable required question: {f.field.label}", None
-                form.fill_form(page, planned)
+                form.fill(page, planned)
         except Exception as form_exc:
             log.warning("error planning or filling modal step on LinkedIn: %s", form_exc)
 
