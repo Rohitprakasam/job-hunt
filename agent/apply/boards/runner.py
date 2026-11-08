@@ -75,7 +75,9 @@ def default_board_browser(settings: Settings, display: str = ":99"):
             headless=False if os.name != "nt" else settings.apply.headless,
             viewport={"width": 1280, "height": 900},
             locale="en-IN",
-            args=["--no-sandbox", "--disable-setuid-sandbox"] if os.name != "nt" else [],
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-http2"]
+            if os.name != "nt"
+            else ["--disable-http2"],
         )
         try:
             yield context

@@ -673,7 +673,14 @@ def boards_login(
                     def check_logged_in() -> bool:
                         for p in context.pages:
                             try:
-                                current_url = p.evaluate("() => window.location.href").lower()
+                                current_url = p.url.lower()
+                                try:
+                                    eval_url = p.evaluate("() => window.location.href").lower()
+                                    if "chromewebdata" not in eval_url:
+                                        current_url = eval_url
+                                except Exception:
+                                    pass
+
                                 if site == "linkedin":
                                     if (
                                         "session_redirect" in current_url
@@ -700,7 +707,10 @@ def boards_login(
                                         continue
                                     if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
                                         return True
-                                    if p.query_selector(".user-info, .nI-gNb-drawer") is not None:
+                                    if (
+                                        p.query_selector(".user-info, .nI-gNb-drawer, a[href*='mnjuser']")
+                                        is not None
+                                    ):
                                         return True
                                 elif site == "indeed":
                                     if "/auth" in current_url or "/account/login" in current_url:
@@ -711,7 +721,7 @@ def boards_login(
                                         return True
                                     if (
                                         p.query_selector(
-                                            "[data-gnav-element*='profile'], button[aria-label*='account']"
+                                            "[data-gnav-element*='profile'], button[aria-label*='account'], #AccountMenu"
                                         )
                                         is not None
                                     ):
