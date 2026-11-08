@@ -59,7 +59,43 @@ def is_display_active(display: str = DEFAULT_DISPLAY) -> bool:
     display_num = display.lstrip(":")
     lock_file = f"/tmp/.X{display_num}-lock"
     socket_file = f"/tmp/.X11-unix/X{display_num}"
-    return os.path.exists(lock_file) or os.path.exists(socket_file)
+
+    # 1. Check lock file PID
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file) as f:
+                pid_str = f.read().strip()
+            if pid_str:
+                pid = int(pid_str)
+                os.kill(pid, 0)
+                return True
+        except (ProcessLookupError, ValueError):
+            # Process is dead; remove stale lock and socket
+            for p in (lock_file, socket_file):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except Exception:
+                    pass
+        except PermissionError:
+            return True
+        except Exception:
+            pass
+
+    # 2. Check UNIX socket connection if available
+    if hasattr(socket, "AF_UNIX") and os.path.exists(socket_file):
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                s.connect(socket_file)
+                return True
+        except Exception:
+            try:
+                os.remove(socket_file)
+            except Exception:
+                pass
+
+    return False
 
 
 def start_xvfb(
@@ -69,6 +105,16 @@ def start_xvfb(
     if is_display_active(display):
         log.debug("Xvfb already active on %s", display)
         return None
+
+    # Clean any stale files before starting
+    display_num = display.lstrip(":")
+    for p in (f"/tmp/.X{display_num}-lock", f"/tmp/.X11-unix/X{display_num}"):
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
+
     xvfb_bin = shutil.which("Xvfb")
     if not xvfb_bin:
         log.warning("Xvfb binary not found")
@@ -76,7 +122,7 @@ def start_xvfb(
     cmd = [xvfb_bin, display, "-screen", "0", f"{width}x{height}x24", "-ac"]
     log.info("starting Xvfb on %s", display)
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(30):
+    for _ in range(50):
         if is_display_active(display):
             return proc
         time.sleep(0.1)
@@ -93,6 +139,13 @@ def stop_xvfb(proc: subprocess.Popen | None, display: str = DEFAULT_DISPLAY) -> 
                 proc.kill()
             except Exception:
                 pass
+    display_num = display.lstrip(":")
+    for p in (f"/tmp/.X{display_num}-lock", f"/tmp/.X11-unix/X{display_num}"):
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
 
 
 def open_view(
