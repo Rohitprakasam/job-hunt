@@ -243,11 +243,16 @@ def apply(
             # Wait for confirmation text
             for _ in range(int(confirmation_timeout_s * 2)):
                 page.wait_for_timeout(500)
-                body_text = page.inner_text("body").lower()
+                try:
+                    all_text = page.evaluate(
+                        "() => document.body.innerText.toLowerCase() + ' ' + Array.from(document.querySelectorAll('dialog, [role=\"dialog\"], .jobs-easy-apply-modal')).map(el => el.innerText.toLowerCase()).join(' ')"
+                    )
+                except Exception:
+                    all_text = ""
                 if (
-                    "application sent" in body_text
-                    or "your application was sent" in body_text
-                    or "application was sent" in body_text
+                    "application sent" in all_text
+                    or "your application was sent" in all_text
+                    or "application was sent" in all_text
                 ):
                     page.screenshot(path=str(screenshot_path))
                     return "confirmed", None, screenshot_path
@@ -256,6 +261,19 @@ def apply(
             page.wait_for_timeout(2000)
             dlg_open = page.query_selector(modal_selector)
             if dlg_open and dlg_open.is_visible():
+                dlg_text = ""
+                try:
+                    dlg_text = dlg_open.inner_text().lower()
+                except Exception:
+                    pass
+                if (
+                    "application sent" in dlg_text
+                    or "your application was sent" in dlg_text
+                    or "application was sent" in dlg_text
+                ):
+                    page.screenshot(path=str(screenshot_path))
+                    return "confirmed", None, screenshot_path
+
                 page.screenshot(path=str(screenshot_path))
                 return (
                     "failed",
