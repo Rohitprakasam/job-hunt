@@ -148,6 +148,22 @@ def stop_xvfb(proc: subprocess.Popen | None, display: str = DEFAULT_DISPLAY) -> 
             pass
 
 
+def kill_stale_live_view_procs() -> None:
+    """Kill any stale x11vnc or websockify instances before starting a new view."""
+    if os.name != "nt" and shutil.which("pkill"):
+        for proc_name in ("websockify", "x11vnc"):
+            try:
+                subprocess.run(
+                    ["pkill", "-f", proc_name],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+        time.sleep(0.3)
+
+
 def open_view(
     site: str,
     reason: str,
@@ -161,6 +177,7 @@ def open_view(
 
     If the WhatsApp send fails or 24h window is closed, the view is NOT opened and None is returned.
     """
+    kill_stale_live_view_procs()
     link = os.environ.get("JOB_AGENT_SECRET_LIVE_VIEW_LINK", "").strip()
     if not link:
         from pathlib import Path
