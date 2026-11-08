@@ -236,6 +236,13 @@ def run_board_apply(
                                     log.warning("human resolution timed out for %s", site)
                                     break
 
+                            # Re-navigate to target job URL now that human login/captcha is resolved
+                            try:
+                                page.goto(candidate["url"], timeout=30000, wait_until="domcontentloaded")
+                                page.wait_for_timeout(3000)
+                            except Exception as nav_exc:
+                                log.warning("error re-navigating to job URL after human step: %s", nav_exc)
+
                             state = adapter.detect_state(page)
                             if state.state != "apply":
                                 break

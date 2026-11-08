@@ -711,7 +711,7 @@ def boards_login(
                                     ):
                                         return True
                                 elif site == "indeed":
-                                    if "/auth" in current_url or "/account/login" in current_url:
+                                    if any(x in current_url for x in ("/auth", "/account/login")):
                                         continue
                                     if "indeed.com" in current_url and any(
                                         x in current_url
@@ -726,7 +726,7 @@ def boards_login(
                                         return True
                                     if (
                                         p.query_selector(
-                                            "[data-gnav-element*='profile'], button[aria-label*='account'], #AccountMenu, a[href*='account'], a[href*='profile']"
+                                            "[data-gnav-element*='profile'], [data-gnav-element='user-avatar'], button[aria-label*='account'], #AccountMenu, a[href*='/myjobs'], a[href*='/settings/account']"
                                         )
                                         is not None
                                     ):

@@ -11,7 +11,6 @@ Handles:
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from pathlib import Path
 
@@ -24,8 +23,12 @@ log = logging.getLogger(__name__)
 
 INDEED_APPLY_SELECTORS = [
     "button#indeedApplyButton",
+    "#indeedApplyButton",
+    "[data-testid='indeedApplyButton']",
     "button:has-text('Apply now')",
     "button:has-text('Indeed Apply')",
+    "button[aria-label*='Apply now']",
+    "button[aria-label*='Indeed Apply']",
     "a:has-text('Apply now')",
 ]
 
@@ -33,6 +36,9 @@ EXTERNAL_APPLY_SELECTORS = [
     "a:has-text('Apply on company site')",
     "button:has-text('Apply on company site')",
     "a[aria-label*='Apply on company site']",
+    "button[aria-label*='Apply on company site']",
+    "a:has-text('Apply directly')",
+    "a:has-text('Apply on employer')",
 ]
 
 
@@ -98,6 +104,7 @@ def apply(
     confirmation_timeout_s: int = 30,
 ) -> tuple[str, str | None, Path | None]:
     """Execute Indeed Apply multi-step flow. Returns (outcome, error, screenshot_path)."""
+    app_dict = dict(app)
     clicked = False
     for sel in INDEED_APPLY_SELECTORS:
         try:
@@ -116,6 +123,10 @@ def apply(
     max_steps = 10
     step = 0
 
+    resume_p = Path(app_dict["resume_path"]) if app_dict.get("resume_path") else None
+    cover_p = Path(app_dict["cover_path"]) if app_dict.get("cover_path") else None
+    cover_text = cover_p.read_text(encoding="utf-8") if cover_p and cover_p.exists() else ""
+
     while step < max_steps:
         step += 1
         page.wait_for_timeout(1500)
@@ -130,13 +141,20 @@ def apply(
             page.screenshot(path=str(screenshot_path))
             return "confirmed", None, screenshot_path
 
-        # 1. Resume upload if an input[type=file] is visible
+        # 1. Resume upload
         try:
-            fi = page.query_selector("input[type='file']")
-            if fi and fi.is_visible():
-                resume_path = app["resume_path"] if "resume_path" in app.keys() else None
-                if resume_path and os.path.exists(resume_path):
-                    fi.set_input_files(str(resume_path))
+            if resume_p and resume_p.exists():
+                upload_btn = page.query_selector(
+                    "button:has-text('Upload resume'), button:has-text('Upload a resume'), input[type='file']"
+                )
+                if upload_btn and upload_btn.is_visible():
+                    tag_name = upload_btn.evaluate("el => el.tagName.toLowerCase()")
+                    if tag_name == "input":
+                        upload_btn.set_input_files(str(resume_p))
+                    else:
+                        with page.expect_file_chooser(timeout=5000) as fc_info:
+                            upload_btn.click()
+                        fc_info.value.set_files(str(resume_p))
                     page.wait_for_timeout(1000)
         except Exception as exc:
             log.warning("error attaching resume on Indeed: %s", exc)
@@ -146,13 +164,20 @@ def apply(
             fields = form.find_fields(page)
             if fields:
                 planned = form.plan_fields(
-                    fields, conn, profile, client, None, None, app["job_id"], app.get("company", "")
+                    fields,
+                    conn,
+                    profile,
+                    client,
+                    resume_p,
+                    cover_text,
+                    app_dict.get("job_id"),
+                    app_dict.get("company", ""),
                 )
                 for f in planned:
-                    if f.field.required and (f.value is None or str(f.value).strip() == ""):
+                    if f.field.required and (f.plan.value is None or str(f.plan.value).strip() == ""):
                         answers.record_pending(conn, f.field.label, None)
                         return "skipped", f"unanswerable required question: {f.field.label}", None
-                form.fill_form(page, planned)
+                form.fill(page, planned)
         except Exception as exc:
             log.warning("error filling Indeed step: %s", exc)
 
