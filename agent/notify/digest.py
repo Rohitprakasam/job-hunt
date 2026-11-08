@@ -29,15 +29,24 @@ def in_quiet_hours(now: datetime, notify: NotifySettings) -> bool:
     return (t >= start or t < end) if start > end else (start <= t < end)
 
 
-def _tag(conn: sqlite3.Connection, settings: Settings, ats_type: str | None) -> str:
-    if not ats_type or ats_type not in ("greenhouse", "lever", "ashby"):
-        return "you"
-    try:
-        from agent.apply.runner import live_allowed
+def _tag(
+    conn: sqlite3.Connection, settings: Settings, ats_type: str | None, source: str | None = None
+) -> str:
+    if ats_type in ("greenhouse", "lever", "ashby"):
+        try:
+            from agent.apply.runner import live_allowed
 
-        return "auto" if live_allowed(conn, settings, ats_type) else "you"
-    except Exception:
-        return "you"
+            return "auto" if live_allowed(conn, settings, ats_type) else "you"
+        except Exception:
+            return "you"
+    if source in ("linkedin", "naukri", "indeed"):
+        try:
+            from agent.apply.boards.base import is_site_live
+
+            return "auto" if is_site_live(conn, settings, source) else "you"
+        except Exception:
+            return "you"
+    return "you"
 
 
 def _line(n: int, row: sqlite3.Row, tag: str = "you") -> str:
@@ -48,7 +57,7 @@ def _line(n: int, row: sqlite3.Row, tag: str = "you") -> str:
 
 def top_new_matches(conn: sqlite3.Connection, settings: Settings, limit: int) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT j.id, j.title, j.company, j.location, j.apply_url, j.url, j.ats_type, s.fit FROM jobs j"
+        "SELECT j.id, j.title, j.company, j.location, j.apply_url, j.url, j.ats_type, j.source, s.fit FROM jobs j"
         " JOIN scores s ON s.job_id = j.id WHERE j.notified_at IS NULL AND j.filter_reason IS NULL"
         " AND s.fit >= ? ORDER BY s.priority DESC LIMIT ?",
         (settings.scoring.min_digest_fit, limit),
@@ -77,7 +86,7 @@ def build_digest(conn: sqlite3.Connection, settings: Settings, now: datetime) ->
     if rows:
         lines.append(f"Top {len(rows)} new matches:")
         for i, r in enumerate(rows, start=1):
-            tag = _tag(conn, settings, r["ats_type"])
+            tag = _tag(conn, settings, r["ats_type"], r["source"])
             lines.append(_line(i, r, tag))
             try:
                 conn.execute(

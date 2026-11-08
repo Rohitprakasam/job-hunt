@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agent import gates
 from agent.discover.base import RawJob, upsert
-from agent.prepare import answers, tailor, truth
+from agent.prepare import answers, runner, tailor, truth
 
 NOW = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
 JOB = {
@@ -197,3 +197,51 @@ def test_more_profile_rules(conn, profile):
     assert answers.lookup(conn, visa, ["Yes", "No"]).value == "No"
     assert answers.rule_answer("In what city and state is your primary residence?", profile) == "Chennai"
     assert answers.rule_answer("Current Title", profile) is None  # the example internship has ended
+
+
+def test_candidates_dedupes_company_and_skips_recent(conn, settings):
+    # Company Alpha has 2 jobs (fit 90 and fit 80)
+    conn.execute(
+        "INSERT INTO jobs (id, source, external_id, title, company, url, apply_url, ats_type, first_seen_at, dedupe_key)"
+        " VALUES (1, 'greenhouse', 'e1', 'Job A1', 'Company Alpha', 'u1', 'https://job-boards.greenhouse.io/embed/job_app?for=alpha&token=1', 'greenhouse', '2026-11-08T00:00:00Z', 'alpha|job1')"
+    )
+    conn.execute(
+        "INSERT INTO scores (job_id, fit, priority, scored_at) VALUES (1, 90.0, 90.0, '2026-11-08T00:00:00Z')"
+    )
+
+    conn.execute(
+        "INSERT INTO jobs (id, source, external_id, title, company, url, apply_url, ats_type, first_seen_at, dedupe_key)"
+        " VALUES (2, 'greenhouse', 'e2', 'Job A2', 'Company Alpha', 'u2', 'https://job-boards.greenhouse.io/embed/job_app?for=alpha&token=2', 'greenhouse', '2026-11-08T00:00:00Z', 'alpha|job2')"
+    )
+    conn.execute(
+        "INSERT INTO scores (job_id, fit, priority, scored_at) VALUES (2, 80.0, 80.0, '2026-11-08T00:00:00Z')"
+    )
+
+    # Company Beta has 1 job (fit 85)
+    conn.execute(
+        "INSERT INTO jobs (id, source, external_id, title, company, url, apply_url, ats_type, first_seen_at, dedupe_key)"
+        " VALUES (3, 'greenhouse', 'e3', 'Job B1', 'Company Beta', 'u3', 'https://job-boards.greenhouse.io/embed/job_app?for=beta&token=3', 'greenhouse', '2026-11-08T00:00:00Z', 'beta|job1')"
+    )
+    conn.execute(
+        "INSERT INTO scores (job_id, fit, priority, scored_at) VALUES (3, 85.0, 85.0, '2026-11-08T00:00:00Z')"
+    )
+
+    # Company Gamma had an application submitted 3 days ago
+    conn.execute(
+        "INSERT INTO jobs (id, source, external_id, title, company, url, apply_url, ats_type, first_seen_at, dedupe_key)"
+        " VALUES (4, 'greenhouse', 'e4', 'Job C1', 'Company Gamma', 'u4', 'https://job-boards.greenhouse.io/embed/job_app?for=gamma&token=4', 'greenhouse', '2026-11-08T00:00:00Z', 'gamma|job1')"
+    )
+    conn.execute(
+        "INSERT INTO scores (job_id, fit, priority, scored_at) VALUES (4, 95.0, 95.0, '2026-11-08T00:00:00Z')"
+    )
+    conn.execute(
+        "INSERT INTO applications (job_id, status, origin, submitted_at)"
+        " VALUES (4, 'submitted', 'agent', '2026-11-05T00:00:00Z')"
+    )
+
+    cands = runner.candidates(conn, settings, limit=10)
+    cand_ids = [c["id"] for c in cands]
+    assert 4 not in cand_ids
+    assert 1 in cand_ids
+    assert 2 not in cand_ids
+    assert 3 in cand_ids

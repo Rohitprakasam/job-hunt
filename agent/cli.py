@@ -228,6 +228,7 @@ track_app = typer.Typer(
     no_args_is_help=True, help="Reply tracking (email import; Gmail polling is postponed)."
 )
 apply_app = typer.Typer(no_args_is_help=True, help="Automatic applying (dry run first).")
+boards_app = typer.Typer(no_args_is_help=True, help="Manage job board logins and live view.")
 review_app = typer.Typer(no_args_is_help=True, help="Weekly review and improvement.")
 service_app = typer.Typer(no_args_is_help=True, help="Run at Windows logon.")
 cluster_app = typer.Typer(no_args_is_help=True, help="InstaBox machine cluster management.")
@@ -239,6 +240,7 @@ for sub, name in (
     (answers_app, "answers"),
     (track_app, "track"),
     (apply_app, "apply"),
+    (boards_app, "boards"),
     (review_app, "review"),
     (service_app, "service"),
     (cluster_app, "cluster"),
@@ -525,6 +527,7 @@ def track_followups() -> None:
 
 @apply_app.command("status")
 def apply_status() -> None:
+    from agent.apply.boards.base import applications_today, prompts_today
     from agent.apply.runner import LIVE_FLAG, clean_dry_runs
 
     settings = config.load_settings()
@@ -537,6 +540,22 @@ def apply_status() -> None:
         console.print(
             f"  {adapter}: {done}/{settings.apply.dry_runs_before_live} clean dry runs, live {'on' if live else 'off'}"
         )
+    if settings.apply.boards:
+        console.print("boards:")
+        now = datetime.now(UTC)
+        for board, b_cfg in settings.apply.boards.items():
+            live = db.get_flag(conn, LIVE_FLAG.format(adapter=board)) == "1"
+            blocked = db.get_flag(conn, f"board_blocked:{board}")
+            status_str = (
+                f"[red]blocked ({blocked})[/]"
+                if blocked
+                else ("[green]live on[/]" if live else "[yellow]live off[/]")
+            )
+            app_cnt = applications_today(conn, board, now)
+            prompt_cnt = prompts_today(conn, board, now)
+            console.print(
+                f"  {board}: {status_str} ({app_cnt}/{b_cfg.daily_cap} apps today, {prompt_cnt}/{settings.apply.human_prompts_per_site_per_day} prompts today)"
+            )
     for outcome, count in conn.execute("SELECT outcome, count(*) FROM apply_attempts GROUP BY outcome"):
         console.print(f"  attempts {outcome}: {count}")
 
@@ -568,6 +587,150 @@ def apply_resume() -> None:
     """Clear the pause set after repeated failures (`agent start` clears a manual stop)."""
     db.clear_flag(_open_db(), "apply_paused")
     console.print("apply pause cleared")
+
+
+# ---------------------------------------------------------------- boards
+
+
+@boards_app.command("status")
+def boards_status() -> None:
+    """Show live status and limits for job boards (LinkedIn, Naukri, Indeed)."""
+    from agent.apply.boards.base import applications_today, prompts_today
+    from agent.apply.runner import LIVE_FLAG
+
+    settings = config.load_settings()
+    conn = _open_db()
+    now = datetime.now(UTC)
+    console.print(f"Board Apply (mode: {settings.apply.mode}):")
+    boards = settings.apply.boards or {}
+    for site in ("linkedin", "naukri", "indeed"):
+        cfg = boards.get(site)
+        live = db.get_flag(conn, LIVE_FLAG.format(adapter=site)) == "1"
+        blocked = db.get_flag(conn, f"board_blocked:{site}")
+        status = "[red]BLOCKED[/]" if blocked else ("[green]LIVE[/]" if live else "[yellow]OFF[/]")
+        apps = applications_today(conn, site, now)
+        prompts = prompts_today(conn, site, now)
+        cap = cfg.daily_cap if cfg else 10
+        console.print(
+            f"  {site:10}: {status:15} apps: {apps}/{cap} today   prompts: {prompts}/{settings.apply.human_prompts_per_site_per_day} today"
+        )
+        if blocked:
+            console.print(f"             Reason: {blocked}")
+
+
+@boards_app.command("login")
+def boards_login(
+    site: str = typer.Argument(..., help="Board site name: linkedin, naukri, or indeed."),
+) -> None:
+    """Open a job board login page in headed browser and trigger live view for manual user sign-in."""
+    from agent.apply.boards import indeed, linkedin, naukri
+    from agent.apply.boards.runner import default_board_browser
+    from agent.live_view import live_view, wait_for_resolution
+    from agent.scheduler import open_ctx
+
+    site = site.lower().strip()
+    login_urls = {
+        "linkedin": "https://www.linkedin.com/login",
+        "naukri": "https://www.naukri.com/nlogin/login",
+        "indeed": "https://secure.indeed.com/auth",
+    }
+    if site not in login_urls:
+        console.print(f"[red]Unknown site '{site}'. Choose from: linkedin, naukri, indeed[/]")
+        raise typer.Exit(1)
+
+    adapters = {
+        "linkedin": linkedin,
+        "naukri": naukri,
+        "indeed": indeed,
+    }
+    adapter = adapters[site]
+    settings = config.load_settings()
+
+    wa = None
+    try:
+        with open_ctx(need_profile=False) as ctx:
+            wa = ctx.wa
+    except Exception:
+        pass
+
+    console.print(f"Opening browser for [bold]{site.capitalize()}[/] login...")
+    with default_board_browser(settings) as context:
+        page = context.new_page()
+        try:
+            url = login_urls[site]
+            console.print(f"Navigating to {url}...")
+            page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+
+            console.print("Opening live view session...")
+            with live_view(
+                site,
+                "initial login",
+                wa_client=wa,
+                timeout_minutes=settings.apply.human_step_minutes,
+            ) as session:
+                if not session:
+                    console.print(
+                        "[red]Could not open live view session. Ensure JOB_AGENT_SECRET_LIVE_VIEW_LINK is configured.[/]"
+                    )
+                    raise typer.Exit(1)
+
+                console.print(f"[green]Live view open for {site.capitalize()}![/]")
+                console.print("Check WhatsApp for the live view link and password, then log in.")
+                console.print(
+                    f"Waiting up to {settings.apply.human_step_minutes} minutes for login to complete..."
+                )
+
+                def check_logged_in() -> bool:
+                    current_url = page.url.lower()
+                    if site == "linkedin":
+                        if "linkedin.com/feed" in current_url or "/in/" in current_url:
+                            return True
+                        try:
+                            if page.query_selector(".global-nav, [data-view-name*='profile']") is not None:
+                                return True
+                        except Exception:
+                            pass
+                    elif site == "naukri":
+                        if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
+                            return True
+                        try:
+                            if page.query_selector(".user-info, .nI-gNb-drawer") is not None:
+                                return True
+                        except Exception:
+                            pass
+                    elif site == "indeed":
+                        if (
+                            "indeed.com" in current_url
+                            and "/auth" not in current_url
+                            and "/account/login" not in current_url
+                        ):
+                            try:
+                                if (
+                                    page.query_selector(
+                                        "[data-gnav-element*='profile'], button[aria-label*='account']"
+                                    )
+                                    is not None
+                                ):
+                                    return True
+                            except Exception:
+                                pass
+                    state = adapter.detect_state(page)
+                    return state.state not in ("needs_human", "blocked")
+
+                resolved = wait_for_resolution(
+                    session,
+                    check_logged_in,
+                    timeout_seconds=settings.apply.human_step_minutes * 60,
+                    poll_interval_s=3.0,
+                )
+                if resolved:
+                    console.print(f"[bold green]Successfully logged in to {site.capitalize()}![/]")
+                    console.print("Session cookies and state saved to persistent profile.")
+                else:
+                    console.print(f"[yellow]Timed out waiting for login to {site.capitalize()}.[/]")
+        finally:
+            page.close()
 
 
 # ---------------------------------------------------------------- review

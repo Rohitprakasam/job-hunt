@@ -1,7 +1,7 @@
 """Apply stage against saved form fixtures in a real headless Chromium (skipped if not installed)."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,7 +10,7 @@ from agent import db
 from agent.apply import runner
 from agent.apply.adapters import GENERIC
 from agent.discover.base import RawJob, upsert
-from agent.gates import volume_gate
+from agent.gates import consecutive_failures, volume_gate
 from agent.prepare import answers
 from tests.test_prepare import NOW
 
@@ -156,7 +156,7 @@ def test_per_ats_failure_pausing(conn, settings, app_row):
     assert runner.live_allowed(conn, live_settings, "lever")
 
     # Greenhouse gets 3 live failures
-    now = datetime.now(UTC)
+    now = datetime.now(UTC) + timedelta(seconds=1)
     for _ in range(3):
         conn.execute(
             "INSERT INTO apply_attempts(application_id, adapter, mode, outcome, started_at)"
@@ -177,3 +177,41 @@ def test_per_ats_failure_pausing(conn, settings, app_row):
     runner.apply_go_dry(conn, "greenhouse")
     assert not runner.live_allowed(conn, live_settings, "greenhouse")
     assert runner.live_allowed(conn, live_settings, "lever")
+
+
+def test_consecutive_failures_resets_on_go_live(conn, settings, app_row):
+    live_settings = settings.model_copy(
+        update={
+            "apply": settings.apply.model_copy(
+                update={"dry_runs_before_live": 0, "mode": "live", "max_consecutive_failures": 3}
+            )
+        }
+    )
+    # Live was previously enabled 1 hour ago
+    db.set_flag(conn, "live_enabled_at:greenhouse", db.to_iso(datetime.now(UTC) - timedelta(hours=1)))
+    db.set_flag(conn, "live_enabled:greenhouse", "1")
+    past = datetime.now(UTC) - timedelta(minutes=10)
+    # 3 failures trip the consecutive failures count
+    for i in range(3):
+        conn.execute(
+            "INSERT INTO apply_attempts(application_id, adapter, mode, outcome, started_at)"
+            " VALUES (?, 'greenhouse', 'live', 'failed', ?)",
+            (app_row["id"], db.to_iso(past + timedelta(seconds=i))),
+        )
+    # Before reset, all 3 are counted
+    assert consecutive_failures(conn, "greenhouse") == 3
+
+    # Re-enabling live via go_live resets the starting time so previous failures don't count
+    runner.go_live(conn, live_settings, "greenhouse")
+    assert consecutive_failures(conn, "greenhouse") == 0
+
+    # 1 new failure counts as 1, not 4
+    conn.execute(
+        "INSERT INTO apply_attempts(application_id, adapter, mode, outcome, started_at)"
+        " VALUES (?, 'greenhouse', 'live', 'failed', ?)",
+        (app_row["id"], db.to_iso(datetime.now(UTC) + timedelta(seconds=1))),
+    )
+    assert consecutive_failures(conn, "greenhouse") == 1
+    assert volume_gate(
+        conn, "Acme", live_settings.apply, datetime.now(UTC) + timedelta(seconds=2), adapter="greenhouse"
+    ).ok

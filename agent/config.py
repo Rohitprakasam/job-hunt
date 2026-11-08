@@ -304,6 +304,10 @@ class DiscoverySettings(Strict):
     request_timeout_s: int = Field(default=30, gt=0)
 
 
+class BoardSettings(Strict):
+    daily_cap: int = Field(default=10, ge=0)
+
+
 class ApplySettings(Strict):
     # off: prepare only. dry_run: fill forms, never submit. live: submit (needs `agent apply go-live`).
     mode: Literal["off", "dry_run", "live"] = "dry_run"
@@ -316,6 +320,15 @@ class ApplySettings(Strict):
     prepare_per_run: int = Field(default=10, ge=0)
     headless: bool = True
     confirmation_timeout_s: int = Field(default=30, ge=5)
+    boards: dict[Literal["linkedin", "naukri", "indeed"], BoardSettings] = Field(
+        default_factory=lambda: {
+            "linkedin": BoardSettings(daily_cap=10),
+            "naukri": BoardSettings(daily_cap=10),
+            "indeed": BoardSettings(daily_cap=10),
+        }
+    )
+    human_step_minutes: int = Field(default=15, ge=1)
+    human_prompts_per_site_per_day: int = Field(default=2, ge=1)
 
 
 class ResumeSettings(Strict):

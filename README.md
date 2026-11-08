@@ -134,9 +134,10 @@ your work authorization / notice period / salary, and saves the old draft as `.b
 6. **Stop any time:** `agent stop`, a file named `STOP` in this folder, `/jobstop` to the bot, or the
    button on `/jobs`. Undo with `agent start` / `/jobstart <PIN>`.
 
-What is not automated on purpose: LinkedIn Easy Apply, Naukri and Indeed applying (their terms forbid
-it and accounts get restricted), CAPTCHAs and login walls (skipped, never worked around), and
-unknown multi-page forms (skipped). Jobs from those sites still reach the digest with the link.
+**Job Boards (opt-in):** LinkedIn Easy Apply, Naukri, and Indeed can be enabled with `agent apply go-live <site>` (run via `deploy/instabox/go_live_boards.sh`).
+*Account risk:* job board automation carries platform account risk (their terms forbid bots and accounts may be restricted).
+*Human-in-the-loop:* every login, OTP, and captcha verification is routed strictly to the user personally through a secure, on-demand live view link sent via WhatsApp (with a 15-minute timeout). Passwords are typed directly by the user in the live browser and never saved on disk, database, or env.
+*Strict caps:* at most 1 application per site per cycle, at most 10 per site per day, and at most 2 live view prompts per site per day. Any account warning or identity request permanently blocks that board and sends an alert. Jobs with external company ATS links (Greenhouse, Lever, Ashby) are automatically upgraded to direct ATS application. Unknown forms or closed listings are skipped.
 
 ## Replies (Gmail polling postponed)
 
@@ -157,6 +158,7 @@ yourself: `agent app add "<company>" "<title>" --url ... --date YYYY-MM-DD`; sta
 | `agent answers seed / set / list / pending` | Answer bank |
 | `agent track import <path> / followups` | Reply import, follow-up check |
 | `agent apply status / go-live <ats> / go-dry <ats> / resume` | Apply rollout |
+| `agent boards status / login <site>` | Job boards live view login and limits |
 | `agent stop` / `agent start` | Kill switch (local + Mongo) |
 | `agent console` | Read-only console on 127.0.0.1:8765 |
 | `agent review weekly / ab / refit / referrals` | Weekly report, resume A/B, re-fit weights (50+ outcomes), referral drafts from `config/contacts.csv` |

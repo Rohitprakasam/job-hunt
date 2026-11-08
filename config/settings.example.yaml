@@ -88,12 +88,21 @@ apply:
   min_fit: 70
   daily_cap: 50
   per_company_days: 30        # at most one application per company per 30 days
-  max_consecutive_failures: 3 # then applying pauses until `agent apply resume`
+  max_consecutive_failures: 3 # then that ATS pauses until `agent apply go-live <ats>`
   adapters: [greenhouse, lever, ashby]
   dry_runs_before_live: 0     # clean dry runs per ATS before `agent apply go-live <ats>` is allowed
   prepare_per_run: 10
   headless: true
   confirmation_timeout_s: 30
+  boards:
+    linkedin:
+      daily_cap: 10
+    naukri:
+      daily_cap: 10
+    indeed:
+      daily_cap: 10
+  human_step_minutes: 15
+  human_prompts_per_site_per_day: 2
 
 # ---- Resume: your own LaTeX file (config/resume.tex) or RenderCV built from profile.yaml
 resume:

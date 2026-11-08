@@ -29,6 +29,7 @@ from agent.runs import stage_run
 log = logging.getLogger(__name__)
 
 LIVE_FLAG = "live_enabled:{adapter}"
+LIVE_ENABLED_AT = "live_enabled_at:{adapter}"
 
 
 @dataclass
@@ -51,11 +52,17 @@ def live_allowed(conn: sqlite3.Connection, settings: Settings, adapter: str) -> 
 
 
 def go_live(conn: sqlite3.Connection, settings: Settings, adapter: str) -> tuple[bool, str]:
-    done = clean_dry_runs(conn, adapter)
-    need = settings.apply.dry_runs_before_live
-    if done < need:
-        return False, f"{adapter}: {done}/{need} clean dry runs; run more dry runs first"
+    is_board = adapter in ("linkedin", "naukri", "indeed") or (
+        settings.apply.boards and adapter in settings.apply.boards
+    )
+    if not is_board:
+        done = clean_dry_runs(conn, adapter)
+        need = settings.apply.dry_runs_before_live
+        if done < need:
+            return False, f"{adapter}: {done}/{need} clean dry runs; run more dry runs first"
     db.set_flag(conn, LIVE_FLAG.format(adapter=adapter), "1")
+    db.set_flag(conn, LIVE_ENABLED_AT.format(adapter=adapter), db.to_iso(datetime.now(UTC)))
+    db.clear_flag(conn, f"board_blocked:{adapter}")
     return True, f"{adapter}: live submissions enabled (apply.mode must also be 'live' in settings.yaml)"
 
 
@@ -283,9 +290,17 @@ def run_apply(
                             except Exception as alert_exc:
                                 log.warning("failed to send WhatsApp pause alert: %s", alert_exc)
                             live = False
-                        else:
+                        elif "daily cap" in volume.detail:
                             result.stopped = volume.detail
                             break
+                        else:  # per-company refusal
+                            log.info("skipping application %d: %s", app["id"], volume.detail)
+                            conn.execute(
+                                "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
+                                (volume.detail, app["id"]),
+                            )
+                            result.outcomes["skipped"] = result.outcomes.get("skipped", 0) + 1
+                            continue
                 started = now()
                 page = context.new_page()
                 try:

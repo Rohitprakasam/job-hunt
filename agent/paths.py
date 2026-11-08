@@ -60,6 +60,17 @@ def browser_profile_dir() -> Path:
     return agent_home() / "browser-profile"
 
 
+def browser_boards_dir() -> Path:
+    """Separate Chromium profile used only for job boards (mode 700, never backed up)."""
+    path = agent_home() / "browser-boards"
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except Exception:
+        pass
+    return path
+
+
 def config_dir() -> Path:
     return Path(os.environ.get("JOB_AGENT_CONFIG", REPO_ROOT / "config"))
 

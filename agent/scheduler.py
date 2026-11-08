@@ -83,14 +83,21 @@ def prepare_and_apply(ctx: Ctx) -> str:
         ctx.wa.send_text(
             "✅ *Applied*\n" + "\n".join(f"- {x}" for x in applied.submitted), kind="applied", priority=2
         )
-    if applied.stopped and "failed in a row" in applied.stopped:
-        from agent.notify.digest import send_alert
-
-        send_alert(
-            ctx.wa, "⛔ Applying paused: 3 submissions failed in a row. `agent apply resume` after a look."
-        )
     paused = f" (prepare paused: {prepared.stopped})" if prepared.stopped else ""
     return f"prepared {prepared.prepared} skipped {prepared.skipped}{paused}; apply {applied.outcomes or applied.stopped}"
+
+
+def board_apply(ctx: Ctx) -> str:
+    from agent.apply.boards.runner import run_board_apply
+
+    if killswitch.is_stopped(ctx.conn, ctx.cloud):
+        return "stopped (kill switch)"
+    applied = run_board_apply(ctx.conn, ctx.settings, ctx.profile, ctx.client, ctx.cloud, wa=ctx.wa)
+    if applied.submitted:
+        ctx.wa.send_text(
+            "✅ *Applied*\n" + "\n".join(f"- {x}" for x in applied.submitted), kind="applied", priority=2
+        )
+    return f"board apply {applied.outcomes or applied.stopped}"
 
 
 def prep_packs(ctx: Ctx) -> str:
@@ -350,7 +357,10 @@ def cycle(ctx: Ctx, now: datetime | None = None) -> str:
         # 7. prepare-apply
         outcomes.append(f"prepare-apply: {run_stage('prepare-apply')}")
 
-        # 7. prep-packs
+        # 7b. board-apply
+        outcomes.append(f"board-apply: {run_stage('board-apply')}")
+
+        # 8. prep-packs
         outcomes.append(f"prep-packs: {run_stage('prep-packs')}")
 
         # 8. heartbeat
@@ -406,6 +416,7 @@ STAGES: dict[str, tuple[Callable[[Ctx], str], bool]] = {
     "digest": (digest, False),
     "inbox": (inbox, False),
     "prepare-apply": (prepare_and_apply, True),
+    "board-apply": (board_apply, True),
     "prep-packs": (prep_packs, True),
     "heartbeat": (heartbeat, False),
     "flush": (flush, False),
@@ -461,6 +472,7 @@ def run_forever() -> None:  # pragma: no cover - wiring only; each stage is test
         id="boards",
     )
     sched.add_job(lambda: run_stage("prepare-apply"), "interval", minutes=30, id="apply")
+    sched.add_job(lambda: run_stage("board-apply"), "interval", minutes=60, id="board-apply")
     sched.add_job(lambda: run_stage("digest"), "cron", hour=digest_h, minute=digest_m, id="digest")
     sched.add_job(lambda: run_stage("prep-packs"), "interval", hours=2, id="prep")
     sched.add_job(

@@ -8,11 +8,14 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agent import paths
+from agent import db, paths
 from agent.config import Profile, Settings
+from agent.discover.base import norm_company
 from agent.gates import GateResult, as_json, fit_gate, truth_gate
 from agent.llm import LLMBusy, LLMPaused, QuotaExhausted
 from agent.prepare import latex, render, tailor
@@ -74,13 +77,63 @@ class PrepareResult:
 def candidates(conn: sqlite3.Connection, settings: Settings, limit: int) -> list[sqlite3.Row]:
     adapters = settings.apply.adapters
     marks = ",".join("?" * len(adapters))
-    return conn.execute(
+
+    # Check board sites that are live enabled
+    board_marks = []
+    for board in ("linkedin", "naukri", "indeed"):
+        if db.get_flag(conn, f"live_enabled:{board}") == "1":
+            board_marks.append(board)
+
+    # Companies with an application submitted or applied in the last per_company_days
+    recent_companies = set()
+    if settings.apply.per_company_days:
+        since = db.to_iso(datetime.now(UTC) - timedelta(days=settings.apply.per_company_days))
+        rows = conn.execute(
+            "SELECT j.company FROM applications a JOIN jobs j ON j.id = a.job_id"
+            " WHERE (a.submitted_at >= ? OR a.status IN ('submitted', 'applied')) AND a.status NOT IN ('prepared', 'skipped')",
+            (since,),
+        ).fetchall()
+        recent_companies = {norm_company(r["company"]) for r in rows}
+
+    where_clauses = [
+        "a.id IS NULL",
+        "j.filter_reason IS NULL",
+        "s.fit >= ?",
+    ]
+    params: list[Any] = [settings.apply.min_fit]
+
+    if board_marks:
+        b_marks = ",".join("?" * len(board_marks))
+        where_clauses.append(
+            f"((j.ats_type IN ({marks}) AND j.apply_url IS NOT NULL) OR (j.source IN ({b_marks}) AND j.url IS NOT NULL))"
+        )
+        params.extend(adapters)
+        params.extend(board_marks)
+    else:
+        where_clauses.append(f"j.ats_type IN ({marks}) AND j.apply_url IS NOT NULL")
+        params.extend(adapters)
+
+    where_str = " AND ".join(where_clauses)
+    query = (
         f"SELECT j.*, s.fit FROM jobs j JOIN scores s ON s.job_id = j.id"
         f" LEFT JOIN applications a ON a.job_id = j.id"
-        f" WHERE a.id IS NULL AND j.filter_reason IS NULL AND s.fit >= ? AND j.ats_type IN ({marks})"
-        f" AND j.apply_url IS NOT NULL ORDER BY s.priority DESC LIMIT ?",
-        (settings.apply.min_fit, *adapters, limit),
-    ).fetchall()
+        f" WHERE {where_str} ORDER BY s.priority DESC, s.fit DESC"
+    )
+    rows = conn.execute(query, params).fetchall()
+
+    chosen = []
+    seen_companies = set()
+    for row in rows:
+        company_norm = norm_company(row["company"])
+        if company_norm in recent_companies:
+            continue
+        if company_norm in seen_companies:
+            continue
+        seen_companies.add(company_norm)
+        chosen.append(row)
+        if len(chosen) >= limit:
+            break
+    return chosen
 
 
 def prepare_one(conn, settings: Settings, profile: Profile, client, job, run_id=None) -> tuple[int, bool]:

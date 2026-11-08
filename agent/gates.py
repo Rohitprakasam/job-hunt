@@ -153,7 +153,14 @@ def volume_gate(
 
 
 def consecutive_failures(conn: sqlite3.Connection, adapter: str | None = None) -> int:
-    if adapter:
+    enabled_at = db.get_flag(conn, f"live_enabled_at:{adapter}") if adapter else None
+    if adapter and enabled_at:
+        rows = conn.execute(
+            "SELECT outcome FROM apply_attempts WHERE mode = 'live' AND adapter = ? AND started_at >= ?"
+            " AND outcome IN ('submitted', 'confirmed', 'failed') ORDER BY id DESC LIMIT 10",
+            (adapter, enabled_at),
+        ).fetchall()
+    elif adapter:
         rows = conn.execute(
             "SELECT outcome FROM apply_attempts WHERE mode = 'live' AND adapter = ? AND outcome IN ('submitted', 'confirmed', 'failed')"
             " ORDER BY id DESC LIMIT 10",

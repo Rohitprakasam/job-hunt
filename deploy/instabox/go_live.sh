@@ -10,15 +10,22 @@ if [ -f "$HOME/.config/job-agent/env" ]; then
     set -a; . "$HOME/.config/job-agent/env"; set +a
 fi
 
+SETTINGS_FILE="${JOB_AGENT_CONFIG:-/data/job-agent/config}/settings.yaml"
+if [ -f "$SETTINGS_FILE" ]; then
+    MODE=$(grep -E '^\s*mode:' "$SETTINGS_FILE" | head -n1 | awk '{print $2}' || true)
+    if [ "$MODE" != "live" ]; then
+        echo "ERROR: apply.mode is not live in settings.yaml (found: '$MODE')" >&2
+        exit 1
+    fi
+fi
+
 echo "=== Enabling Live Submissions on Worker ==="
 
 for ats in greenhouse lever ashby; do
     echo "--- Enabling $ats ---"
-    agent apply go-live "$ats" --yes
+    agent apply go-live "$ats" --yes || true
 done
 
 echo ""
-echo "=== Live Mode Status ==="
-echo "Greenhouse, Lever, and Ashby are now enabled for live submissions."
-echo "Hourly cycles will submit matching applications automatically."
-echo "Stop anytime via WhatsApp: /jobstop or 'agent stop'."
+agent apply status
+

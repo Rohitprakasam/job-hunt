@@ -21,6 +21,7 @@ data/
 logs/
 output/
 browser-profile/
+browser-boards/
 STOP
 
 # Python
