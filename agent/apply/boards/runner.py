@@ -122,168 +122,184 @@ def run_board_apply(
                 if not adapter:
                     continue
 
-                if killswitch.is_stopped(conn, cloud):
-                    result.stopped = "kill switch"
-                    break
+                candidates_evaluated = 0
+                max_evaluations = 5
 
-                # Pick top 1 candidate application for this board site
-                candidate = conn.execute(
-                    "SELECT a.*, j.id as job_id, j.title, j.company, j.url, j.apply_url, j.ats_type, j.source"
-                    " FROM applications a JOIN jobs j ON j.id = a.job_id"
-                    " WHERE a.status = 'prepared' AND a.origin = 'agent' AND j.source = ?"
-                    " ORDER BY a.id LIMIT 1",
-                    (site,),
-                ).fetchone()
+                while candidates_evaluated < max_evaluations:
+                    if killswitch.is_stopped(conn, cloud):
+                        result.stopped = "kill switch"
+                        break
 
-                if not candidate:
-                    continue
+                    # Pick top 1 candidate application for this board site
+                    candidate = conn.execute(
+                        "SELECT a.*, j.id as job_id, j.title, j.company, j.url, j.apply_url, j.ats_type, j.source"
+                        " FROM applications a JOIN jobs j ON j.id = a.job_id"
+                        " WHERE a.status = 'prepared' AND a.origin = 'agent' AND j.source = ?"
+                        " ORDER BY a.id LIMIT 1",
+                        (site,),
+                    ).fetchone()
 
-                target_url = candidate["apply_url"] or candidate["url"]
-                if not target_url:
-                    continue
+                    if not candidate:
+                        break
 
-                app_dir = paths.application_dir(candidate["id"])
-                page = context.new_page()
-                try:
-                    page.goto(target_url, timeout=30000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(2000)
-
-                    state: PageState = adapter.detect_state(page)
-
-                    # 1. Blocked / restricted
-                    if state.state == "blocked":
-                        block_site(conn, site, state.detail or "restricted", wa)
+                    candidates_evaluated += 1
+                    target_url = candidate["apply_url"] or candidate["url"]
+                    if not target_url:
                         conn.execute(
-                            "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
-                            (f"blocked: {state.detail}", candidate["id"]),
+                            "UPDATE applications SET status = 'skipped', skip_reason = 'missing url' WHERE id = ?",
+                            (candidate["id"],),
                         )
-                        result.outcomes["blocked"] = result.outcomes.get("blocked", 0) + 1
                         continue
 
-                    # 2. Closed
-                    if state.state == "closed":
-                        conn.execute(
-                            "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
-                            (f"closed: {state.detail}", candidate["id"]),
-                        )
-                        result.outcomes["closed"] = result.outcomes.get("closed", 0) + 1
-                        continue
+                    app_dir = paths.application_dir(candidate["id"])
+                    page = context.new_page()
+                    try:
+                        page.goto(target_url, timeout=30000, wait_until="domcontentloaded")
+                        page.wait_for_timeout(2000)
 
-                    # 3. External apply
-                    if state.state == "external":
-                        ext_url = state.external_url or target_url
-                        detected = detect_ats(ext_url)
-                        if detected and detected[0] in settings.apply.adapters:
-                            # Upgrade job to Tier A ATS
-                            conn.execute(
-                                "UPDATE jobs SET apply_url = ?, ats_type = ? WHERE id = ?",
-                                (ext_url, detected[0], candidate["job_id"]),
-                            )
-                            log.info(
-                                "Job %d upgraded to Tier A ATS (%s): %s",
-                                candidate["job_id"],
-                                detected[0],
-                                ext_url,
-                            )
-                        else:
+                        state: PageState = adapter.detect_state(page)
+
+                        # 1. Blocked / restricted
+                        if state.state == "blocked":
+                            block_site(conn, site, state.detail or "restricted", wa)
                             conn.execute(
                                 "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
-                                (f"external: {ext_url}", candidate["id"]),
+                                (f"blocked: {state.detail}", candidate["id"]),
                             )
-                        result.outcomes["external"] = result.outcomes.get("external", 0) + 1
-                        continue
+                            result.outcomes["blocked"] = result.outcomes.get("blocked", 0) + 1
+                            break
 
-                    # 4. Needs human (login, OTP, captcha)
-                    if state.state == "needs_human":
-                        if not can_prompt_today(conn, site, settings, current_now):
-                            log.warning("Daily human prompt limit reached for %s; skipping for today", site)
-                            continue
-
-                        record_prompt(conn, site, current_now)
-                        with live_view(
-                            site,
-                            state.detail or "verification",
-                            wa_client=wa,
-                            timeout_minutes=settings.apply.human_step_minutes,
-                        ) as session:
-                            if session is None:
-                                log.warning("could not open live view session for %s", site)
-                                continue
-
-                            def check_resolved(cur_adapter=adapter, cur_page=page):
-                                st = cur_adapter.detect_state(cur_page)
-                                return st.state not in ("needs_human", "blocked")
-
-                            resolved = wait_for_resolution(
-                                session,
-                                check_resolved,
-                                timeout_seconds=settings.apply.human_step_minutes * 60,
-                            )
-                            if not resolved:
-                                log.warning("human resolution timed out for %s", site)
-                                continue
-
-                        state = adapter.detect_state(page)
-                        if state.state != "apply":
-                            continue
-
-                    # 5. Apply
-                    if state.state == "apply":
-                        started_dt = now()
-                        outcome, error, screenshot = adapter.apply(
-                            page,
-                            conn,
-                            profile,
-                            client,
-                            candidate,
-                            app_dir,
-                            settings.apply.confirmation_timeout_s,
-                        )
-                        finished_dt = now()
-
-                        # Record to apply_attempts
-                        conn.execute(
-                            "INSERT INTO apply_attempts(application_id, adapter, mode, outcome, error, screenshot_path, started_at, finished_at)"
-                            " VALUES (?, ?, 'live', ?, ?, ?, ?, ?)",
-                            (
-                                candidate["id"],
-                                site,
-                                outcome,
-                                error,
-                                str(screenshot) if screenshot else None,
-                                db.to_iso(started_dt),
-                                db.to_iso(finished_dt),
-                            ),
-                        )
-
-                        if outcome in ("submitted", "confirmed"):
+                        # 2. Closed
+                        if state.state == "closed":
                             conn.execute(
-                                "UPDATE applications SET status = 'submitted', submitted_at = ?, confirmed_at = ?, follow_up_due = ?"
-                                " WHERE id = ?",
+                                "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
+                                (f"closed: {state.detail}", candidate["id"]),
+                            )
+                            result.outcomes["closed"] = result.outcomes.get("closed", 0) + 1
+                            continue
+
+                        # 3. External apply
+                        if state.state == "external":
+                            ext_url = state.external_url or target_url
+                            detected = detect_ats(ext_url)
+                            if detected and detected[0] in settings.apply.adapters:
+                                # Upgrade job to Tier A ATS
+                                conn.execute(
+                                    "UPDATE jobs SET apply_url = ?, ats_type = ? WHERE id = ?",
+                                    (ext_url, detected[0], candidate["job_id"]),
+                                )
+                                log.info(
+                                    "Job %d upgraded to Tier A ATS (%s): %s",
+                                    candidate["job_id"],
+                                    detected[0],
+                                    ext_url,
+                                )
+                            else:
+                                conn.execute(
+                                    "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
+                                    (f"external: {ext_url}", candidate["id"]),
+                                )
+                            result.outcomes["external"] = result.outcomes.get("external", 0) + 1
+                            continue
+
+                        # 4. Needs human (login, OTP, captcha)
+                        if state.state == "needs_human":
+                            if not can_prompt_today(conn, site, settings, current_now):
+                                log.warning(
+                                    "Daily human prompt limit reached for %s; skipping for today", site
+                                )
+                                break
+
+                            record_prompt(conn, site, current_now)
+                            with live_view(
+                                site,
+                                state.detail or "verification",
+                                wa_client=wa,
+                                timeout_minutes=settings.apply.human_step_minutes,
+                            ) as session:
+                                if session is None:
+                                    log.warning("could not open live view session for %s", site)
+                                    break
+
+                                def check_resolved(cur_adapter=adapter, cur_page=page):
+                                    st = cur_adapter.detect_state(cur_page)
+                                    return st.state not in ("needs_human", "blocked")
+
+                                resolved = wait_for_resolution(
+                                    session,
+                                    check_resolved,
+                                    timeout_seconds=settings.apply.human_step_minutes * 60,
+                                )
+                                if not resolved:
+                                    log.warning("human resolution timed out for %s", site)
+                                    break
+
+                            state = adapter.detect_state(page)
+                            if state.state != "apply":
+                                break
+
+                        # 5. Apply
+                        if state.state == "apply":
+                            started_dt = now()
+                            outcome, error, screenshot = adapter.apply(
+                                page,
+                                conn,
+                                profile,
+                                client,
+                                candidate,
+                                app_dir,
+                                settings.apply.confirmation_timeout_s,
+                            )
+                            finished_dt = now()
+
+                            # Record to apply_attempts
+                            conn.execute(
+                                "INSERT INTO apply_attempts(application_id, adapter, mode, outcome, error, screenshot_path, started_at, finished_at)"
+                                " VALUES (?, ?, 'live', ?, ?, ?, ?, ?)",
                                 (
-                                    db.to_iso(finished_dt),
-                                    db.to_iso(finished_dt) if outcome == "confirmed" else None,
-                                    db.to_iso(finished_dt + timedelta(days=7)),
                                     candidate["id"],
+                                    site,
+                                    outcome,
+                                    error,
+                                    str(screenshot) if screenshot else None,
+                                    db.to_iso(started_dt),
+                                    db.to_iso(finished_dt),
                                 ),
                             )
-                            result.submitted.append(
-                                f"{candidate['title']} — {candidate['company']} ({site.capitalize()})"
-                            )
-                        else:
-                            conn.execute(
-                                "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
-                                (f"{outcome}: {error or ''}", candidate["id"]),
-                            )
 
-                        result.attempted += 1
-                        result.outcomes[outcome] = result.outcomes.get(outcome, 0) + 1
+                            if outcome in ("submitted", "confirmed"):
+                                conn.execute(
+                                    "UPDATE applications SET status = 'submitted', submitted_at = ?, confirmed_at = ?, follow_up_due = ?"
+                                    " WHERE id = ?",
+                                    (
+                                        db.to_iso(finished_dt),
+                                        db.to_iso(finished_dt) if outcome == "confirmed" else None,
+                                        db.to_iso(finished_dt + timedelta(days=7)),
+                                        candidate["id"],
+                                    ),
+                                )
+                                result.submitted.append(
+                                    f"{candidate['title']} — {candidate['company']} ({site.capitalize()})"
+                                )
+                            else:
+                                conn.execute(
+                                    "UPDATE applications SET status = 'skipped', skip_reason = ? WHERE id = ?",
+                                    (f"{outcome}: {error or ''}", candidate["id"]),
+                                )
 
-                except Exception as exc:
-                    log.error("error applying on %s for job %d: %s", site, candidate["job_id"], exc)
-                    result.outcomes["failed"] = result.outcomes.get("failed", 0) + 1
-                finally:
-                    page.close()
+                            result.attempted += 1
+                            result.outcomes[outcome] = result.outcomes.get(outcome, 0) + 1
+                            break
+
+                    except Exception as exc:
+                        log.error("error applying on %s for job %d: %s", site, candidate["job_id"], exc)
+                        result.outcomes["failed"] = result.outcomes.get("failed", 0) + 1
+                        break
+                    finally:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
 
         run.items = result.attempted
     return result
