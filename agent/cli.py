@@ -623,7 +623,6 @@ def boards_login(
     site: str = typer.Argument(..., help="Board site name: linkedin, naukri, or indeed."),
 ) -> None:
     """Open a job board login page in headed browser and trigger live view for manual user sign-in."""
-    from agent.apply.boards import indeed, linkedin, naukri
     from agent.apply.boards.runner import default_board_browser
     from agent.context import open_ctx
     from agent.live_view import live_view, wait_for_resolution
@@ -637,13 +636,6 @@ def boards_login(
     if site not in login_urls:
         console.print(f"[red]Unknown site '{site}'. Choose from: linkedin, naukri, indeed[/]")
         raise typer.Exit(1)
-
-    adapters = {
-        "linkedin": linkedin,
-        "naukri": naukri,
-        "indeed": indeed,
-    }
-    adapter = adapters[site]
 
     with open_ctx(need_profile=False) as ctx:
         settings = ctx.settings
@@ -681,17 +673,33 @@ def boards_login(
                     def check_logged_in() -> bool:
                         current_url = page.url.lower()
                         if site == "linkedin":
-                            if "linkedin.com/feed" in current_url or "/in/" in current_url:
+                            if (
+                                "session_redirect" in current_url
+                                or "/login" in current_url
+                                or "/checkpoint" in current_url
+                            ):
+                                return False
+                            if (
+                                "linkedin.com/feed" in current_url
+                                or "/in/" in current_url
+                                or "/mynetwork" in current_url
+                                or "/jobs" in current_url
+                            ):
                                 return True
                             try:
                                 if (
-                                    page.query_selector(".global-nav, [data-view-name*='profile']")
+                                    page.query_selector(
+                                        ".global-nav, #global-nav, [data-view-name*='profile']"
+                                    )
                                     is not None
                                 ):
                                     return True
                             except Exception:
                                 pass
+                            return False
                         elif site == "naukri":
+                            if "/nlogin" in current_url or "/login" in current_url:
+                                return False
                             if "naukri.com/mnjuser" in current_url or "my.naukri.com" in current_url:
                                 return True
                             try:
@@ -699,24 +707,26 @@ def boards_login(
                                     return True
                             except Exception:
                                 pass
+                            return False
                         elif site == "indeed":
-                            if (
-                                "indeed.com" in current_url
-                                and "/auth" not in current_url
-                                and "/account/login" not in current_url
+                            if "/auth" in current_url or "/account/login" in current_url:
+                                return False
+                            if "indeed.com" in current_url and (
+                                "/feed" in current_url or "/home" in current_url
                             ):
-                                try:
-                                    if (
-                                        page.query_selector(
-                                            "[data-gnav-element*='profile'], button[aria-label*='account']"
-                                        )
-                                        is not None
-                                    ):
-                                        return True
-                                except Exception:
-                                    pass
-                        state = adapter.detect_state(page)
-                        return state.state not in ("needs_human", "blocked")
+                                return True
+                            try:
+                                if (
+                                    page.query_selector(
+                                        "[data-gnav-element*='profile'], button[aria-label*='account']"
+                                    )
+                                    is not None
+                                ):
+                                    return True
+                            except Exception:
+                                pass
+                            return False
+                        return False
 
                     resolved = wait_for_resolution(
                         session,
