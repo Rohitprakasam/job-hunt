@@ -356,7 +356,13 @@ def llm_summary(
 
 
 def tailor(
-    tex: str, job, profile: Profile | None, settings: ResumeSettings, client=None, run_id=None
+    tex: str,
+    job,
+    profile: Profile | None,
+    settings: ResumeSettings,
+    client=None,
+    run_id=None,
+    summary_override: str | None = None,
 ) -> Tailoring:
     job_text = f"{job['title']}\n{job['description'] or ''}"
     terms = job_terms(job_text, profile)
@@ -368,7 +374,18 @@ def tailor(
     out.changes += [note] if note else []
     out.tex, notes = edit_skills(out.tex, job_text, terms)
     out.changes += notes
-    if settings.llm_summary:
+    if summary_override:
+        summary = SUMMARY_RE.search(out.tex)
+        if summary:
+            out.tex = (
+                out.tex[: summary.start(2)]
+                + "\n"
+                + summary_override.strip()
+                + "\n"
+                + out.tex[summary.end(2) :]
+            )
+            out.changes.append("summary: reworded toward the job's terms")
+    elif settings.llm_summary:
         out.tex, out.problems, note = llm_summary(client, out.tex, job, profile, run_id)
         out.changes += [note] if note else []
     final = body_text(out.tex).lower()
@@ -451,20 +468,28 @@ def compile_pdf(tex: str, out_dir: Path, pdf_name: str, command: str = "", timeo
 
 
 def build(
-    profile: Profile, job, settings: ResumeSettings, template: Path, out_dir: Path, client=None, run_id=None
+    profile: Profile,
+    job,
+    settings: ResumeSettings,
+    template: Path,
+    out_dir: Path,
+    client=None,
+    run_id=None,
+    summary_override: str | None = None,
+    pdf_name: str | None = None,
 ) -> tuple[Path, Tailoring]:
     """Tailor + compile. If the tailored version runs over max_pages, retry with the plain template."""
     if not template.exists():
         raise LatexError(f"template not found: {template}")
     original = template.read_text(encoding="utf-8")
-    result = tailor(original, job, profile, settings, client, run_id)
+    result = tailor(original, job, profile, settings, client, run_id, summary_override=summary_override)
     (out_dir / "resume-changes.txt").write_text(
         "\n".join(result.changes or ["(no changes)"])
         + f"\n\nATS keywords matched: {', '.join(result.matched) or '-'}"
         + f"\nIn the job but not in your resume: {', '.join(result.missing) or '-'}\n",
         encoding="utf-8",
     )
-    name = settings.pdf_name or f"{profile.contact.full_name.replace(' ', '_')}_Resume.pdf"
+    name = pdf_name or settings.pdf_name or f"{profile.contact.full_name.replace(' ', '_')}_Resume.pdf"
     pdf = compile_pdf(result.tex, out_dir, name, settings.latex_command)
     if page_count(pdf) > settings.max_pages and result.tex != original:
         log.warning("tailored resume ran over %s page(s); using the template as written", settings.max_pages)

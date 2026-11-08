@@ -119,7 +119,7 @@ def start_xvfb(
     if not xvfb_bin:
         log.warning("Xvfb binary not found")
         return None
-    cmd = [xvfb_bin, display, "-screen", "0", f"{width}x{height}x24", "-ac"]
+    cmd = [xvfb_bin, display, "-screen", "0", f"{width}x{height}x24"]
     log.info("starting Xvfb on %s", display)
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(50):

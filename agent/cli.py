@@ -452,6 +452,65 @@ def app_status(app_id: int, status: str) -> None:
     console.print(f"application {app_id}: {status}")
 
 
+@app_app.command("rebuild")
+def app_rebuild(
+    app_id: int = typer.Argument(..., help="Application ID to rebuild"),
+    template_path: Path | None = typer.Option(None, "--template", help="Specific template file to use"),
+    name: str | None = typer.Option(None, "--name", help="Specific PDF file name to output"),
+) -> None:
+    """Rebuild a tailored resume PDF using latex.build and saved tailored.json."""
+    import json
+
+    from agent.context import open_ctx
+    from agent.prepare import latex
+
+    with open_ctx() as ctx:
+        conn = ctx.conn
+        settings = ctx.settings
+        profile = ctx.profile
+
+        row = conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+        if not row:
+            console.print(f"[red]Application {app_id} not found[/]")
+            raise typer.Exit(1)
+
+        job = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["job_id"],)).fetchone()
+        if not job:
+            console.print(f"[red]Job {row['job_id']} not found[/]")
+            raise typer.Exit(1)
+
+        app_dir = paths.application_dir(app_id)
+        tailored_file = app_dir / "tailored.json"
+        summary_override = None
+        if tailored_file.exists():
+            try:
+                t_data = json.loads(tailored_file.read_text(encoding="utf-8"))
+                summary_override = t_data.get("summary")
+            except Exception:
+                pass
+
+        tpl = template_path or (paths.config_dir() / settings.resume.latex_template)
+        if not tpl.exists():
+            console.print(f"[red]Template {tpl} not found[/]")
+            raise typer.Exit(1)
+
+        pdf, tailoring = latex.build(
+            profile,
+            dict(job),
+            settings.resume,
+            tpl,
+            app_dir,
+            client=None,
+            summary_override=summary_override,
+            pdf_name=name,
+        )
+        pages = latex.page_count(pdf)
+        conn.execute("UPDATE applications SET resume_path = ? WHERE id = ?", (str(pdf), app_id))
+        console.print(f"Application {app_id} rebuilt: {pdf.name} ({pages} page(s))")
+        if pages > 1:
+            console.print(f"[yellow]WARNING: PDF has {pages} pages (expected 1)[/]")
+
+
 # ---------------------------------------------------------------- answers
 
 

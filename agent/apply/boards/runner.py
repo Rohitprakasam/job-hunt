@@ -145,6 +145,32 @@ def run_board_apply(
                         break
 
                     candidates_evaluated += 1
+
+                    # LinkedIn permanent check: skip applications whose resume is longer than 1 page
+                    if site == "linkedin":
+                        resume_p = candidate["resume_path"]
+                        if resume_p and os.path.exists(resume_p):
+                            from pathlib import Path
+
+                            from agent.prepare.latex import page_count
+
+                            try:
+                                if page_count(Path(resume_p)) > 1:
+                                    log.warning(
+                                        "LinkedIn application %d has %d-page resume; skipping (must be 1 page)",
+                                        candidate["id"],
+                                        page_count(Path(resume_p)),
+                                    )
+                                    conn.execute(
+                                        "UPDATE applications SET status = 'skipped', skip_reason = 'resume longer than 1 page' WHERE id = ?",
+                                        (candidate["id"],),
+                                    )
+                                    continue
+                            except Exception as pe:
+                                log.warning(
+                                    "could not check resume page count for app %d: %s", candidate["id"], pe
+                                )
+
                     target_url = candidate["apply_url"] or candidate["url"]
                     if not target_url:
                         conn.execute(
